@@ -59,6 +59,10 @@ jobs:
           key: ${{ runner.os }}-zig-${{ hashFiles('zig-sqlite/build.zig.zon') }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}-zig-${{ hashFiles('zig-sqlite/build.zig.zon') }}-
 
+      - name: Ensure zig package-fetch tmp dir exists
+        shell: bash
+        run: mkdir -p "$ZIG_GLOBAL_CACHE_DIR/tmp"
+
       - name: Run tests (in-memory)
         working-directory: zig-sqlite
         if: ${{ matrix.os == 'ubuntu-24.04' }}
