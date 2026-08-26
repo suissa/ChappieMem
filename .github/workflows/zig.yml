@@ -2,7 +2,7 @@ name: Zig
 
 on:
   push:
-    branches: [main, claude/zig-0.16-github-actions-2aququ]
+    branches: [main]
     paths:
       - 'zig-sqlite/**'
       - '.github/workflows/zig.yml'
