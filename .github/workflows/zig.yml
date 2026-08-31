@@ -13,13 +13,17 @@ on:
       - '.github/workflows/zig.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: zig-${{ github.ref }}
+  group: zig-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +42,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -50,15 +55,8 @@ jobs:
         if: ${{ matrix.os == 'ubuntu-24.04' }}
         run: sudo apt-get update -y && sudo apt-get install -y qemu-user-binfmt
 
-      - name: Restore cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            zig-sqlite/zig-cache
-            ~/.cache/zig
-          key: ${{ runner.os }}-zig-${{ hashFiles('zig-sqlite/build.zig.zon') }}-${{ github.sha }}
-          restore-keys: ${{ runner.os }}-zig-${{ hashFiles('zig-sqlite/build.zig.zon') }}-
-
+      # mlugg/setup-zig already caches $ZIG_GLOBAL_CACHE_DIR (compiler + fetched
+      # packages) keyed on the Zig version, so no extra actions/cache step is needed.
       - name: Ensure zig package-fetch tmp dir exists
         shell: bash
         run: mkdir -p "$ZIG_GLOBAL_CACHE_DIR/tmp"
