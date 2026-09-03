@@ -44,13 +44,13 @@ test "error sets compose as supersets" {
 
     const embed_err: EmbeddingError = error.EmbeddingError;
     const as_index: IndexError = embed_err;
-    try std.testing.expectError(error.EmbeddingError, as_index);
+    try std.testing.expect(as_index == error.EmbeddingError);
 
     const strategy_err: StrategyError = error.StrategyError;
     const as_search: SearchError = strategy_err;
-    try std.testing.expectError(error.StrategyError, as_search);
+    try std.testing.expect(as_search == error.StrategyError);
 
     const cfg_err: ConfigError = error.ConfigError;
     const as_mem_weave: MemWeaveError = cfg_err;
-    try std.testing.expectError(error.ConfigError, as_mem_weave);
+    try std.testing.expect(as_mem_weave == error.ConfigError);
 }

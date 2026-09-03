@@ -50,7 +50,7 @@ fn daysFromCivil(year: i32, month: u8, day: u8) i64 {
 /// input (no-decay fallback, no error).
 pub fn toDecayLambda(half_life_days: f64) f64 {
     if (!std.math.isFinite(half_life_days) or half_life_days <= 0) return 0.0;
-    return std.math.ln(@as(f64, 2.0)) / half_life_days;
+    return @log(@as(f64, 2.0)) / half_life_days;
 }
 
 /// `exp(−λ × age_days)`, `age_days` clamped to `>= 0`. Returns `1.0` when

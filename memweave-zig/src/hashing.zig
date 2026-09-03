@@ -169,7 +169,11 @@ test "sha256File hashes a temp file's contents in streaming 8KB chunks" {
     defer tmp_dir.cleanup();
 
     const content = "hello";
-    try tmp_dir.dir.writeFile(.{ .sub_path = "f.txt", .data = content });
+    {
+        var file = try tmp_dir.dir.createFile("f.txt", .{});
+        defer file.close();
+        try file.writeAll(content);
+    }
 
     const path = try tmp_dir.dir.realpathAlloc(std.testing.allocator, "f.txt");
     defer std.testing.allocator.free(path);
