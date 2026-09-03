@@ -1,0 +1,16 @@
+.{
+    .name = .memweave,
+    .fingerprint = 0x34ac20f592af554d,
+    .minimum_zig_version = "0.16.0",
+    .version = "0.1.0",
+    .dependencies = .{
+        .sqlite = .{
+            .path = "../zig-sqlite",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'zig-sqlite/**'
+      - 'memweave-zig/**'
       - '.github/workflows/zig.yml'
   pull_request:
     branches: [main]
     paths:
       - 'zig-sqlite/**'
+      - 'memweave-zig/**'
       - '.github/workflows/zig.yml'
   workflow_dispatch:
 
@@ -32,8 +34,12 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: zig fmt --check
+      - name: zig fmt --check (zig-sqlite)
         working-directory: zig-sqlite
+        run: zig fmt --check .
+
+      - name: zig fmt --check (memweave-zig)
+        working-directory: memweave-zig
         run: zig fmt --check .
 
   test:
@@ -70,3 +76,22 @@ jobs:
         working-directory: zig-sqlite
         if: ${{ matrix.os != 'ubuntu-24.04' }}
         run: zig build test -Dci=true -Din_memory=true --summary all
+
+  memweave-zig-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Run tests
+        working-directory: memweave-zig
+        run: zig build test --summary all
