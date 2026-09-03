@@ -41,10 +41,16 @@ pub fn sha256File(allocator: std.mem.Allocator, path: []const u8) ![64]u8 {
     var file = try std.Io.Dir.cwd().openFile(io, path, .{});
     defer file.close(io);
 
+    // `Reader.readAlloc(allocator, n)` allocates exactly `n` bytes and
+    // requires the stream to fill it completely (it errors with
+    // `error.EndOfStream` on a short read), so `n` must be the file's
+    // actual size rather than an upper bound.
+    const stat = try file.stat(io);
+
     var read_buf: [8192]u8 = undefined;
     var reader = file.reader(io, &read_buf);
 
-    const data = try reader.interface.readAlloc(allocator, 1024 * 1024 * 1024);
+    const data = try reader.interface.readAlloc(allocator, @intCast(stat.size));
     defer allocator.free(data);
 
     return sha256Hex(data);
