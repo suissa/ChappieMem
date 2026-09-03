@@ -276,10 +276,12 @@ test "MemoryConfig defaults are valid and resolve derived paths" {
     try cfg.validate();
 
     const db_path = try cfg.resolvedDbPath(allocator);
-    try std.testing.expectEqualStrings("/tmp/project/.memweave/index.sqlite", db_path);
+    const expected_db_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp/project", ".memweave", "index.sqlite" });
+    try std.testing.expectEqualStrings(expected_db_path, db_path);
 
     const mem_dir = try cfg.memoryDir(allocator);
-    try std.testing.expectEqualStrings("/tmp/project/memory", mem_dir);
+    const expected_mem_dir = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp/project", "memory" });
+    try std.testing.expectEqualStrings(expected_mem_dir, mem_dir);
 }
 
 test "MemoryConfig db_path override wins over the derived default" {

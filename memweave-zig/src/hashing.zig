@@ -163,32 +163,23 @@ test "makeProviderKey gives different keys for different endpoints of the same m
 }
 
 test "sha256File hashes a temp file's contents" {
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    // `std.testing.tmpDir` returns a `std.Io.Dir`, whose methods need an
-    // explicit `Io` — same pattern zig-sqlite's build/Preprocessor.zig
-    // uses for its own file I/O.
+    // Write directly into the test's own working directory instead of
+    // `std.testing.tmpDir` — its backing directory name (`zig-cache/` vs.
+    // `.zig-cache/`) has changed across Zig versions and isn't worth
+    // depending on here. `std.Io.Dir.cwd()` methods need an explicit `Io`,
+    // same pattern zig-sqlite's build/Preprocessor.zig uses for file I/O.
     var threaded = std.Io.Threaded.init_single_threaded;
     const io = threaded.io();
 
-    const content = "hello";
+    const path = "hashing_test_sha256file_tmp.txt";
     {
-        var file = try tmp_dir.dir.createFile(io, "f.txt", .{});
+        var file = try std.Io.Dir.cwd().createFile(io, path, .{});
         defer file.close(io);
 
         var write_buf: [64]u8 = undefined;
         var w = file.writer(io, &write_buf);
-        try w.interface.writeAll(content);
+        try w.interface.writeAll("hello");
     }
-
-    // `Io.Dir` has no `realpathAlloc` — build the path the same way
-    // zig-sqlite/test.zig does: `std.testing.tmpDir` creates its directory
-    // under `zig-cache/tmp/<sub_path>/` relative to the cwd.
-    const path = try std.fs.path.join(std.testing.allocator, &[_][]const u8{
-        "zig-cache", "tmp", &tmp_dir.sub_path, "f.txt",
-    });
-    defer std.testing.allocator.free(path);
 
     const digest = try sha256File(std.testing.allocator, path);
     try std.testing.expectEqualStrings(
