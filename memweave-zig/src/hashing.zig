@@ -168,11 +168,21 @@ test "sha256File hashes a temp file's contents in streaming 8KB chunks" {
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
+    // `std.testing.tmpDir` returns a `std.Io.Dir`, whose write-side methods
+    // (unlike `openFile`, used by `sha256File` below via the simpler
+    // `std.fs.cwd()`) need an explicit `Io` — same pattern zig-sqlite's
+    // build/Preprocessor.zig uses for its own file writes.
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.io();
+
     const content = "hello";
     {
-        var file = try tmp_dir.dir.createFile("f.txt", .{});
-        defer file.close();
-        try file.writeAll(content);
+        var file = try tmp_dir.dir.createFile(io, "f.txt", .{});
+        defer file.close(io);
+
+        var write_buf: [64]u8 = undefined;
+        var w = file.writer(io, &write_buf);
+        try w.interface.writeAll(content);
     }
 
     const path = try tmp_dir.dir.realpathAlloc(std.testing.allocator, "f.txt");
