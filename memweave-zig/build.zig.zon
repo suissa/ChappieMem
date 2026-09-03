@@ -1,6 +1,6 @@
 .{
     .name = .memweave,
-    .fingerprint = 0x34ac20f592af554d,
+    .fingerprint = 0x98ac49b7cef1778,
     .minimum_zig_version = "0.16.0",
     .version = "0.1.0",
     .dependencies = .{

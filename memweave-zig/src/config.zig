@@ -261,7 +261,7 @@ test "FlushConfig defaults are valid" {
 }
 
 test "FlushConfig default system prompt matches the documented contract" {
-    const prompt = FlushConfig{}.system_prompt;
+    const prompt = (FlushConfig{}).system_prompt;
     try std.testing.expect(std.mem.startsWith(u8, prompt, "Pre-compaction memory flush.\n"));
     try std.testing.expect(std.mem.endsWith(u8, prompt, "If nothing to store, reply with @@SILENT_REPLY@@."));
     try std.testing.expect(std.mem.indexOf(u8, prompt, "memory/YYYY-MM-DD.md") != null);
