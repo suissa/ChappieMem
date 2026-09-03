@@ -30,26 +30,24 @@ pub fn sha256Text(text: []const u8) [64]u8 {
     return sha256Hex(text);
 }
 
-/// SHA-256 hex digest of a file on disk, read in 8KB chunks
-/// (mirrors `sha256_file`). `path` is resolved via the current working
-/// directory, matching callers that already hold an absolute path.
-pub fn sha256File(path: []const u8) ![64]u8 {
-    var file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+/// SHA-256 hex digest of a file on disk (mirrors `sha256_file`). `path` is
+/// resolved via the current working directory, matching callers that
+/// already hold an absolute path. `allocator` is used only to buffer the
+/// file's contents for hashing; freed before returning.
+pub fn sha256File(allocator: std.mem.Allocator, path: []const u8) ![64]u8 {
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.io();
 
-    var hasher = Sha256.init(.{});
-    var buf: [8192]u8 = undefined;
-    while (true) {
-        const n = try file.read(&buf);
-        if (n == 0) break;
-        hasher.update(buf[0..n]);
-    }
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
-    var digest: [Sha256.digest_length]u8 = undefined;
-    hasher.final(&digest);
-    var out: [64]u8 = undefined;
-    hexEncode(&digest, &out);
-    return out;
+    var read_buf: [8192]u8 = undefined;
+    var reader = file.reader(io, &read_buf);
+
+    const data = try reader.interface.readAlloc(allocator, 1024 * 1024 * 1024);
+    defer allocator.free(data);
+
+    return sha256Hex(data);
 }
 
 /// Deterministic, stable chunk ID from its metadata (mirrors `make_chunk_id`).
@@ -164,14 +162,13 @@ test "makeProviderKey gives different keys for different endpoints of the same m
     try std.testing.expect(!std.mem.eql(u8, &k1, &k2));
 }
 
-test "sha256File hashes a temp file's contents in streaming 8KB chunks" {
+test "sha256File hashes a temp file's contents" {
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    // `std.testing.tmpDir` returns a `std.Io.Dir`, whose write-side methods
-    // (unlike `openFile`, used by `sha256File` below via the simpler
-    // `std.fs.cwd()`) need an explicit `Io` — same pattern zig-sqlite's
-    // build/Preprocessor.zig uses for its own file writes.
+    // `std.testing.tmpDir` returns a `std.Io.Dir`, whose methods need an
+    // explicit `Io` — same pattern zig-sqlite's build/Preprocessor.zig
+    // uses for its own file I/O.
     var threaded = std.Io.Threaded.init_single_threaded;
     const io = threaded.io();
 
@@ -193,7 +190,7 @@ test "sha256File hashes a temp file's contents in streaming 8KB chunks" {
     });
     defer std.testing.allocator.free(path);
 
-    const digest = try sha256File(path);
+    const digest = try sha256File(std.testing.allocator, path);
     try std.testing.expectEqualStrings(
         "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
         &digest,
