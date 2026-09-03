@@ -185,6 +185,11 @@ test "sha256File hashes a temp file's contents" {
         var write_buf: [64]u8 = undefined;
         var w = file.writer(io, &write_buf);
         try w.interface.writeAll("hello");
+        // Buffered writes sit in `write_buf` until explicitly flushed —
+        // without this the file is still empty (size 0) when sha256File
+        // reads it below, confirmed by a real CI run hashing to the
+        // empty-input digest instead of "hello"'s.
+        try w.interface.flush();
     }
 
     const digest = try sha256File(std.testing.allocator, path);
