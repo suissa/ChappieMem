@@ -185,7 +185,12 @@ test "sha256File hashes a temp file's contents in streaming 8KB chunks" {
         try w.interface.writeAll(content);
     }
 
-    const path = try tmp_dir.dir.realpathAlloc(std.testing.allocator, "f.txt");
+    // `Io.Dir` has no `realpathAlloc` — build the path the same way
+    // zig-sqlite/test.zig does: `std.testing.tmpDir` creates its directory
+    // under `zig-cache/tmp/<sub_path>/` relative to the cwd.
+    const path = try std.fs.path.join(std.testing.allocator, &[_][]const u8{
+        "zig-cache", "tmp", &tmp_dir.sub_path, "f.txt",
+    });
     defer std.testing.allocator.free(path);
 
     const digest = try sha256File(path);
