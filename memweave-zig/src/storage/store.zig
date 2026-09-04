@@ -49,6 +49,24 @@ pub const HashEmbedding = struct {
     embedding: []f32,
 };
 
+/// Column shape shared by every `chunks` row query. Named (rather than an
+/// inline anonymous struct at each call site) because Zig gives each
+/// anonymous struct literal its own distinct nominal type even when
+/// structurally identical — two separately-written `struct { ... }`
+/// literals with the same fields are NOT interchangeable.
+const ChunkRow = struct {
+    id: []const u8,
+    path: []const u8,
+    source: []const u8,
+    start_line: i64,
+    end_line: i64,
+    hash: []const u8,
+    model: []const u8,
+    text: []const u8,
+    embedding: ?[]const u8,
+    updated_at: i64,
+};
+
 /// Encode a float slice as a JSON array string, e.g. `[0.1,0.2,0.3]`
 /// (mirrors storing `json.dumps(embedding)`). Hand-rolled instead of using
 /// `std.json` to keep this module's surface small and fully self-tested.
@@ -192,7 +210,7 @@ pub const Store = struct {
     ) errors.StorageError!void {
         try self.beginWrite();
 
-        const embedding_json: ?[]u8 = if (embedding) |e|
+        const embedding_json: ?[]const u8 = if (embedding) |e|
             encodeEmbeddingJson(allocator, e) catch return error.StorageError
         else
             null;
@@ -208,18 +226,7 @@ pub const Store = struct {
         ) catch return error.StorageError;
     }
 
-    fn rowToChunk(allocator: std.mem.Allocator, row: struct {
-        id: []const u8,
-        path: []const u8,
-        source: []const u8,
-        start_line: i64,
-        end_line: i64,
-        hash: []const u8,
-        model: []const u8,
-        text: []const u8,
-        embedding: ?[]const u8,
-        updated_at: i64,
-    }) errors.StorageError!ChunkRecord {
+    fn rowToChunk(allocator: std.mem.Allocator, row: ChunkRow) errors.StorageError!ChunkRecord {
         const embedding: ?[]f32 = if (row.embedding) |e|
             decodeEmbeddingJson(allocator, e) catch return error.StorageError
         else
@@ -240,18 +247,7 @@ pub const Store = struct {
 
     pub fn getChunk(self: *Store, allocator: std.mem.Allocator, chunk_id: []const u8) errors.StorageError!?ChunkRecord {
         const row = self.db.oneAlloc(
-            struct {
-                id: []const u8,
-                path: []const u8,
-                source: []const u8,
-                start_line: i64,
-                end_line: i64,
-                hash: []const u8,
-                model: []const u8,
-                text: []const u8,
-                embedding: ?[]const u8,
-                updated_at: i64,
-            },
+            ChunkRow,
             allocator,
             \\SELECT id, path, source, start_line, end_line, hash, model, text, embedding, updated_at
             \\FROM chunks WHERE id = ?{[]const u8}
@@ -271,26 +267,10 @@ pub const Store = struct {
         ) catch return error.StorageError;
         defer stmt.deinit();
 
-        const rows = stmt.all(
-            struct {
-                id: []const u8,
-                path: []const u8,
-                source: []const u8,
-                start_line: i64,
-                end_line: i64,
-                hash: []const u8,
-                model: []const u8,
-                text: []const u8,
-                embedding: ?[]const u8,
-                updated_at: i64,
-            },
-            allocator,
-            .{},
-            .{path},
-        ) catch return error.StorageError;
+        const rows = stmt.all(ChunkRow, allocator, .{}, .{path}) catch return error.StorageError;
         defer allocator.free(rows);
 
-        var out = try allocator.alloc(ChunkRecord, rows.len);
+        var out = allocator.alloc(ChunkRecord, rows.len) catch return error.StorageError;
         for (rows, 0..) |r, i| out[i] = try rowToChunk(allocator, r);
         return out;
     }
@@ -352,7 +332,7 @@ pub const Store = struct {
     ) errors.StorageError!void {
         try self.beginWrite();
 
-        const embedding_json = encodeEmbeddingJson(allocator, embedding) catch return error.StorageError;
+        const embedding_json: []const u8 = encodeEmbeddingJson(allocator, embedding) catch return error.StorageError;
         defer allocator.free(embedding_json);
 
         self.db.exec(
@@ -408,7 +388,7 @@ pub const Store = struct {
 
         for (hashes) |hash| {
             if (try self.getEmbedding(allocator, provider, model, provider_key, hash)) |vec| {
-                try out.append(allocator, .{ .hash = hash, .embedding = vec });
+                out.append(allocator, .{ .hash = hash, .embedding = vec }) catch return error.StorageError;
             }
         }
         return out.toOwnedSlice(allocator) catch return error.StorageError;
@@ -621,12 +601,12 @@ test "Store: FTS upsert replaces the previous row for the same chunk id" {
     try store.upsertFts("second version", "chunk-1", "memory/x.md", "memory", 1, 5, "text-embedding-3-small");
     try store.commit();
 
-    const count = try db.one(i64, "SELECT COUNT(*) FROM chunks_fts WHERE id = ?{[]const u8}", .{}, .{"chunk-1"});
+    const count = try db.one(i64, "SELECT COUNT(*) FROM chunks_fts WHERE id = ?", .{}, .{"chunk-1"});
     try std.testing.expectEqual(@as(?i64, 1), count);
 
     try store.deleteFtsByPath("memory/x.md");
     try store.commit();
-    const after_delete = try db.one(i64, "SELECT COUNT(*) FROM chunks_fts WHERE id = ?{[]const u8}", .{}, .{"chunk-1"});
+    const after_delete = try db.one(i64, "SELECT COUNT(*) FROM chunks_fts WHERE id = ?", .{}, .{"chunk-1"});
     try std.testing.expectEqual(@as(?i64, 0), after_delete);
 }
 
