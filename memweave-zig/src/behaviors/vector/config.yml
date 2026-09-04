@@ -1,0 +1,9 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: vector
+  profile: default
+  doc: "On with auto-detection — the common case on a machine that has the extension installed."
+spec:
+  values:
+    enabled: true

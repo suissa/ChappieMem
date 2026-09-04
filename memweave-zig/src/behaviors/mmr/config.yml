@@ -1,0 +1,10 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: mmr
+  profile: default
+  doc: "Disabled, but pre-tuned so enabling it is a one-line change."
+spec:
+  values:
+    enabled: false
+    lambda_param: 0.7

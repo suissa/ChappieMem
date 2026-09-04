@@ -4,13 +4,18 @@
 //! This is the public module surface, mirroring `memweave/__init__.py`'s
 //! `__all__`. Phase 1 covers configuration, result types, the error set,
 //! and the pure, I/O-free algorithm modules (chunking, hashing, temporal
-//! decay, MMR re-ranking, vector normalization). The SQLite-backed storage
+//! decay, MMR re-ranking, vector normalization). Configuration is not
+//! hand-written: `factory` builds each config type at comptime from the
+//! `manifest.yml` + `config.yml` + `schema.yml` descriptors in the
+//! behaviour folders `behaviors` catalogues. The SQLite-backed storage
 //! layer, the search pipeline, the embedding provider, the `MemWeave`
 //! orchestrator, and the CLI land in later phases — see
 //! `docs/IMPLEMENTATION.md` (Zig port section) for the full roadmap.
 
 pub const errors = @import("errors.zig");
 pub const types = @import("types.zig");
+pub const factory = @import("factory.zig");
+pub const behaviors = @import("behaviors.zig");
 pub const config = @import("config.zig");
 pub const chunking = @import("chunking.zig");
 pub const hashing = @import("hashing.zig");
@@ -23,6 +28,8 @@ test {
     // (rooted at this file, see build.zig) covers the whole tree.
     _ = errors;
     _ = types;
+    _ = factory;
+    _ = behaviors;
     _ = config;
     _ = chunking;
     _ = hashing;

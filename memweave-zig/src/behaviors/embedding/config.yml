@@ -1,0 +1,11 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: embedding
+  profile: default
+  doc: "OpenAI's small embedding model — cheap, 1536-dimensional, good enough for prose."
+spec:
+  values:
+    model: "text-embedding-3-small"
+    timeout: 60.0
+    batch_size: 64

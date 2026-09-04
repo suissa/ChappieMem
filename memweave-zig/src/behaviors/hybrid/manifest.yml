@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: hybrid
+  version: 0.1.0
+  summary: "How semantic and keyword scores are blended into one ranking."
+  tags: [search, ranking]
+spec:
+  stability: stable
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.HybridConfig
+  consumers: []

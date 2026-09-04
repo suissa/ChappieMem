@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: flush
+  version: 0.1.0
+  summary: "The pre-compaction pass that writes durable memories before context is lost."
+  tags: [memory, llm]
+spec:
+  stability: beta
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.FlushConfig
+  consumers: []

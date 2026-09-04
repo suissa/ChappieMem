@@ -1,0 +1,16 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: sync
+  version: 0.1.0
+  summary: "When the index is brought up to date with the files on disk."
+  tags: [indexing, filesystem]
+spec:
+  stability: beta
+  # Values only; the watcher and the scheduler that read them are I/O and
+  # land with the storage layer.
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.SyncConfig
+  consumers: []

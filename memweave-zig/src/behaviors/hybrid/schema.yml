@@ -1,0 +1,28 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    vector_weight:
+      type: f64
+      doc: "Weight of the vector (semantic) score in the blend."
+      constraints:
+        gte: 0
+        lte: 1
+    text_weight:
+      type: f64
+      doc: "Weight of the keyword (BM25) score in the blend."
+      constraints:
+        gte: 0
+        lte: 1
+    candidate_multiplier:
+      type: u32
+      doc: "Candidate pool per branch is max_results x this, merged before the final cut."
+      constraints:
+        gte: 1
+  invariants:
+    weights_sum_to_one:
+      rule: sum_eq
+      fields: [vector_weight, text_weight]
+      value: 1.0
+      epsilon: 0.000001
+      doc: "The blend is a convex combination; 1.0/0.0 gives pure vector search, 0.0/1.0 pure keyword search."

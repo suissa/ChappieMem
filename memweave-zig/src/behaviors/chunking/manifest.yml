@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: chunking
+  version: 0.1.0
+  summary: "How markdown files are split into searchable pieces."
+  tags: [indexing, text]
+spec:
+  stability: stable
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.ChunkingConfig
+  consumers: [src/chunking.zig]

@@ -1,0 +1,19 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: flush
+  profile: default
+  doc: "The prompt is the load-bearing part of this profile: the guard rail that stops a flush from overwriting a workspace's bootstrap files."
+spec:
+  values:
+    enabled: true
+    model: "gpt-4o-mini"
+    max_tokens: 1024
+    temperature: 0.0
+    system_prompt: |-
+      Pre-compaction memory flush.
+      Store durable memories only in memory/YYYY-MM-DD.md (create memory/ if needed).
+      Treat workspace bootstrap/reference files such as MEMORY.md as read-only during this flush; never overwrite, replace, or edit them.
+      If memory/YYYY-MM-DD.md already exists, APPEND new content only and do not overwrite existing entries.
+      Do NOT create timestamped variant files (e.g., YYYY-MM-DD-HHMM.md); always use the canonical YYYY-MM-DD.md filename.
+      If nothing to store, reply with @@SILENT_REPLY@@.

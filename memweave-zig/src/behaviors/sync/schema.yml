@@ -1,0 +1,16 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    on_search:
+      type: bool
+      doc: "Re-index changed files before serving a search, so results are never stale."
+    watch:
+      type: bool
+      doc: "Keep a filesystem watcher running and re-index in the background."
+    watch_debounce_ms:
+      type: u32
+      doc: "Quiet period after a filesystem event before re-indexing, so an editor's save storm counts once."
+    interval_minutes:
+      type: u32
+      doc: "Periodic re-index interval. 0 disables the timer."

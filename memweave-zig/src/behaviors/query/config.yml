@@ -1,0 +1,17 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: query
+  profile: default
+  doc: "A handful of confidently-relevant results rather than a long tail of maybes."
+spec:
+  values:
+    strategy: "hybrid"
+    max_results: 6
+    min_score: 0.35
+    snippet_max_chars: 700
+    # hybrid, mmr and temporal_decay are not listed: each composed behaviour
+    # brings its own profile. Pin a nested value here only to override it,
+    # e.g.
+    #   mmr:
+    #     enabled: true

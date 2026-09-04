@@ -1,0 +1,32 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    strategy:
+      type: string
+      doc: "'hybrid', 'vector', 'keyword', or the name of a custom registered strategy — so this is deliberately not a closed set."
+    max_results:
+      type: u32
+      doc: "Results returned to the caller after ranking and filtering."
+      constraints:
+        gte: 1
+    min_score:
+      type: f64
+      doc: "Results below this score are dropped rather than padded in."
+      constraints:
+        gte: 0
+        lte: 1
+    snippet_max_chars:
+      type: u32
+      doc: "Characters of chunk text carried back with each result."
+      constraints:
+        gte: 1
+    hybrid:
+      type: behavior<hybrid>
+      doc: "How the vector and keyword branches are blended."
+    mmr:
+      type: behavior<mmr>
+      doc: "Optional diversity re-ranking pass."
+    temporal_decay:
+      type: behavior<temporal_decay>
+      doc: "Optional recency weighting."

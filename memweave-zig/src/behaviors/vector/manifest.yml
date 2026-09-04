@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: vector
+  version: 0.1.0
+  summary: "Availability of the sqlite-vec extension for vector search."
+  tags: [storage, search]
+spec:
+  stability: beta
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.VectorConfig
+  consumers: [src/vectors.zig]
