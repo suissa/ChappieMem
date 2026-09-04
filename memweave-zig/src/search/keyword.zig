@@ -729,7 +729,7 @@ pub fn search(
     limit: i64,
     source_filter: ?[]const u8,
 ) errors.SearchError![]types.RawSearchRow {
-    const maybe_fts_query = buildFtsQuery(allocator, query) catch return error.SearchError;
+    const maybe_fts_query: ?[]const u8 = buildFtsQuery(allocator, query) catch return error.SearchError;
     const fts_query = maybe_fts_query orelse {
         return allocator.alloc(types.RawSearchRow, 0) catch return error.SearchError;
     };
