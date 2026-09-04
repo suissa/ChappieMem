@@ -2,9 +2,14 @@
 
 Each folder here is one **atomic behaviour** — a single decision the system
 makes, described by data rather than code. `src/factory.zig` reads those
-descriptors while the compiler runs and emits a Zig module for each one; the
-config types the rest of the library uses (`config.EmbeddingConfig`,
-`config.MemoryConfig`, …) exist nowhere in the source tree.
+descriptors while the compiler runs and emits a Zig module for each one, which
+`src/forger.zig` re-exports as `forger.EmbeddingConfig`, `forger.MemoryConfig`
+and the rest — types that exist nowhere in the source tree.
+
+`src/config.zig` still declares the same eleven structs by hand. It is kept
+deliberately, as an independent second opinion: the parity tests at the bottom
+of `forger.zig` walk both sides with reflection and fail the build if a
+descriptor drifts from the hand-written reference.
 
 ## The three files
 
@@ -138,17 +143,17 @@ cascade.
 ## Using a behaviour
 
 ```zig
-const config = @import("config.zig");
+const forger = @import("forger.zig");
 
-const cfg = config.ChunkingConfig{ .tokens = 512 };   // profile defaults + override
-try config.Chunking.validate(cfg);                    // generated from schema.yml
-const budget = config.Chunking.ops.maxChars(cfg);     // hand-written derivation
+const cfg = forger.ChunkingConfig{ .tokens = 512 };   // profile defaults + override
+try forger.Chunking.validate(cfg);                    // generated from schema.yml
+const budget = forger.Chunking.ops.maxChars(cfg);     // hand-written derivation
 ```
 
 The behaviour module is the namespace and the `Config` struct is plain data,
 so what used to be a method is now a call on the module:
 
-| was | is |
+| hand-written (`config.zig`) | forged (`forger.zig`) |
 | --- | --- |
 | `cfg.validate()` | `Chunking.validate(cfg)` |
 | `cfg.maxChars()` | `Chunking.ops.maxChars(cfg)` |
@@ -161,7 +166,7 @@ runtime), `defaults`, `composes`, `withOverrides()` and `describe()`.
 1. Create the folder with the three `.yml` files (and `ops.zig` if it has
    derivations).
 2. Add one line to the catalogue in `src/behaviors.zig`.
-3. Re-export it from `src/config.zig` if the library's public surface needs it.
+3. Re-export it from `src/forger.zig` if the library's public surface needs it.
 
 Everything else — the struct, the defaults, the validator, the cascade — is
 generated. `zig build test` walks the whole catalogue and checks that every

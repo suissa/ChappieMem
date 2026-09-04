@@ -1,196 +1,267 @@
-//! Configuration — assembled by the behaviour factory rather than declared.
+//! Configuration structs mirroring the Python `memweave.config` module.
 //!
-//! Every struct below used to be hand-written here, each with its own
-//! `validate()` transcribing the matching Python `__post_init__`. They are
-//! now generated: `src/behaviors/<name>/` holds one folder per atomic
-//! behaviour with `manifest.yml` (identity), `schema.yml` (shape and rules)
-//! and `config.yml` (this profile's values), and `factory.zig` turns that
-//! trio into a Zig module at comptime. See `src/behaviors/README.md` for the
-//! full rationale and `src/factory.zig` for the mechanism.
+//! Each struct carries the same defaults as its Python dataclass and a
+//! `validate()` that enforces the same conditions as the matching
+//! `__post_init__` (Python raises `ValueError`; here we return
+//! `errors.ConfigError`). Nested configs cascade validation the same way
+//! `MemoryConfig.__post_init__` implicitly does by constructing nested
+//! dataclasses (whose own `__post_init__` runs first).
 //!
-//! What this file is now: the facade. It names the behaviours the library
-//! ships with and re-exports their generated types under the same names the
-//! rest of the codebase (and the Python original) already uses.
-//!
-//! Two things moved, both because a generated struct type has fields but no
-//! methods:
-//!
-//!   * `cfg.validate()`  →  `Chunking.validate(cfg)`
-//!   * `cfg.maxChars()`  →  `Chunking.ops.maxChars(cfg)`
-//!
-//! The behaviour module is the namespace; the `Config` struct is plain data.
-//!
-//! JSON (de)serialization (`to_dict`/`from_dict` in Python) is still absent —
-//! deferred to the phase that adds config persistence — but `Behavior.spec`
-//! now carries the field list, types and constraints at runtime, which is
-//! most of what that phase needs.
+//! JSON (de)serialization (`to_dict`/`from_dict` in Python) is intentionally
+//! omitted here — deferred to the phase that adds config persistence.
 
 const std = @import("std");
-const behaviors = @import("behaviors.zig");
 const errors = @import("errors.zig");
 
-// -- The behaviour modules ---------------------------------------------------
-//
-// Each is a namespace: `.Config` (the generated struct), `.defaults`,
-// `.validate()`, `.spec`, `.manifest`, `.describe()`, and `.ops` where the
-// behaviour has hand-written derivations.
+pub const EmbeddingConfig = struct {
+    model: []const u8 = "text-embedding-3-small",
+    api_base: ?[]const u8 = null,
+    api_key: ?[]const u8 = null,
+    timeout: f64 = 60.0,
+    batch_size: u32 = 64,
 
-pub const Embedding = behaviors.Behavior("embedding");
-pub const Chunking = behaviors.Behavior("chunking");
-pub const Hybrid = behaviors.Behavior("hybrid");
-pub const MMR = behaviors.Behavior("mmr");
-pub const TemporalDecay = behaviors.Behavior("temporal_decay");
-pub const Query = behaviors.Behavior("query");
-pub const Cache = behaviors.Behavior("cache");
-pub const Sync = behaviors.Behavior("sync");
-pub const Flush = behaviors.Behavior("flush");
-pub const Vector = behaviors.Behavior("vector");
-pub const Memory = behaviors.Behavior("memory");
+    pub fn validate(self: EmbeddingConfig) errors.ConfigError!void {
+        if (self.timeout <= 0) return error.ConfigError;
+        if (self.batch_size == 0) return error.ConfigError;
+    }
+};
 
-// -- Config types ------------------------------------------------------------
-//
-// Same names as the hand-written structs they replace, so callers and the
-// Python parity mapping are unchanged.
+pub const ChunkingConfig = struct {
+    tokens: u32 = 400,
+    overlap: u32 = 80,
 
-pub const EmbeddingConfig = Embedding.Config;
-pub const ChunkingConfig = Chunking.Config;
-pub const HybridConfig = Hybrid.Config;
-pub const MMRConfig = MMR.Config;
-pub const TemporalDecayConfig = TemporalDecay.Config;
-pub const QueryConfig = Query.Config;
-pub const CacheConfig = Cache.Config;
-pub const SyncConfig = Sync.Config;
-pub const FlushConfig = Flush.Config;
-pub const VectorConfig = Vector.Config;
-pub const MemoryConfig = Memory.Config;
+    pub fn validate(self: ChunkingConfig) errors.ConfigError!void {
+        if (self.tokens == 0) return error.ConfigError;
+        if (self.overlap >= self.tokens) return error.ConfigError;
+    }
 
-// -- Shipped defaults --------------------------------------------------------
-//
-// These now read out of the generated profiles instead of being declared
-// twice. `src/behaviors/flush/config.yml` is the single source of truth for
-// the flush prompt.
+    /// 1 token ≈ 4 chars.
+    pub fn maxChars(self: ChunkingConfig) u32 {
+        return @max(32, self.tokens * 4);
+    }
 
-pub const default_flush_system_prompt = Flush.defaults.system_prompt;
-pub const default_bootstrap_files = Memory.defaults.bootstrap_files;
-pub const default_evergreen_patterns = Memory.defaults.evergreen_patterns;
+    pub fn overlapChars(self: ChunkingConfig) u32 {
+        return self.overlap * 4;
+    }
+};
 
-// -- Tests -------------------------------------------------------------------
-//
-// These are the same assertions the hand-written structs carried, re-pointed
-// at the generated modules: the port's parity with Python is what is being
-// checked, not the factory's plumbing (that is tested in `src/factory/`).
+pub const HybridConfig = struct {
+    vector_weight: f64 = 0.7,
+    text_weight: f64 = 0.3,
+    candidate_multiplier: u32 = 4,
+
+    pub fn validate(self: HybridConfig) errors.ConfigError!void {
+        if (self.vector_weight < 0.0 or self.vector_weight > 1.0) return error.ConfigError;
+        if (self.text_weight < 0.0 or self.text_weight > 1.0) return error.ConfigError;
+        if (@abs(self.vector_weight + self.text_weight - 1.0) > 1e-6) return error.ConfigError;
+        if (self.candidate_multiplier == 0) return error.ConfigError;
+    }
+};
+
+pub const MMRConfig = struct {
+    enabled: bool = false,
+    lambda_param: f64 = 0.7,
+
+    pub fn validate(self: MMRConfig) errors.ConfigError!void {
+        if (self.lambda_param < 0.0 or self.lambda_param > 1.0) return error.ConfigError;
+    }
+};
+
+pub const TemporalDecayConfig = struct {
+    enabled: bool = false,
+    half_life_days: f64 = 30.0,
+
+    pub fn validate(self: TemporalDecayConfig) errors.ConfigError!void {
+        if (self.half_life_days <= 0) return error.ConfigError;
+    }
+};
+
+pub const QueryConfig = struct {
+    strategy: []const u8 = "hybrid",
+    max_results: u32 = 6,
+    min_score: f64 = 0.35,
+    snippet_max_chars: u32 = 700,
+    hybrid: HybridConfig = .{},
+    mmr: MMRConfig = .{},
+    temporal_decay: TemporalDecayConfig = .{},
+
+    pub fn validate(self: QueryConfig) errors.ConfigError!void {
+        if (self.max_results == 0) return error.ConfigError;
+        if (self.min_score < 0.0 or self.min_score > 1.0) return error.ConfigError;
+        if (self.snippet_max_chars == 0) return error.ConfigError;
+        try self.hybrid.validate();
+        try self.mmr.validate();
+        try self.temporal_decay.validate();
+    }
+};
+
+pub const CacheConfig = struct {
+    enabled: bool = true,
+    /// `null` = unlimited; otherwise LRU eviction by `updated_at` once exceeded.
+    max_entries: ?u32 = null,
+
+    pub fn validate(self: CacheConfig) errors.ConfigError!void {
+        if (self.max_entries) |n| {
+            if (n == 0) return error.ConfigError;
+        }
+    }
+};
+
+pub const SyncConfig = struct {
+    on_search: bool = true,
+    watch: bool = false,
+    watch_debounce_ms: u32 = 1500,
+    interval_minutes: u32 = 0,
+};
+
+pub const default_flush_system_prompt =
+    \\Pre-compaction memory flush.
+    \\Store durable memories only in memory/YYYY-MM-DD.md (create memory/ if needed).
+    \\Treat workspace bootstrap/reference files such as MEMORY.md as read-only during this flush; never overwrite, replace, or edit them.
+    \\If memory/YYYY-MM-DD.md already exists, APPEND new content only and do not overwrite existing entries.
+    \\Do NOT create timestamped variant files (e.g., YYYY-MM-DD-HHMM.md); always use the canonical YYYY-MM-DD.md filename.
+    \\If nothing to store, reply with @@SILENT_REPLY@@.
+;
+
+pub const FlushConfig = struct {
+    enabled: bool = true,
+    model: []const u8 = "gpt-4o-mini",
+    max_tokens: u32 = 1024,
+    temperature: f64 = 0.0,
+    system_prompt: []const u8 = default_flush_system_prompt,
+
+    pub fn validate(self: FlushConfig) errors.ConfigError!void {
+        if (self.max_tokens == 0) return error.ConfigError;
+        if (self.temperature < 0.0 or self.temperature > 2.0) return error.ConfigError;
+    }
+};
+
+pub const VectorConfig = struct {
+    enabled: bool = true,
+    /// `null` = auto-detect the sqlite-vec loadable extension.
+    extension_path: ?[]const u8 = null,
+};
+
+pub const default_evergreen_patterns = [_][]const u8{ "MEMORY.md", "memory.md" };
+pub const default_bootstrap_files = [_][]const u8{"MEMORY.md"};
+
+pub const MemoryConfig = struct {
+    workspace_dir: []const u8 = "~/.memweave/default",
+    /// `null` → `resolvedDbPath()` falls back to `workspace_dir/.memweave/index.sqlite`.
+    db_path: ?[]const u8 = null,
+    timezone: []const u8 = "UTC",
+
+    embedding: EmbeddingConfig = .{},
+    chunking: ChunkingConfig = .{},
+    query: QueryConfig = .{},
+    cache: CacheConfig = .{},
+    sync: SyncConfig = .{},
+    flush: FlushConfig = .{},
+    vector: VectorConfig = .{},
+
+    progress: bool = true,
+    extra_paths: []const []const u8 = &.{},
+    bootstrap_files: []const []const u8 = &default_bootstrap_files,
+    evergreen_patterns: []const []const u8 = &default_evergreen_patterns,
+
+    pub fn validate(self: MemoryConfig) errors.ConfigError!void {
+        try self.embedding.validate();
+        try self.chunking.validate();
+        try self.query.validate();
+        try self.cache.validate();
+        try self.flush.validate();
+    }
+
+    /// `db_path` if set, else `workspace_dir/.memweave/index.sqlite`.
+    ///
+    /// Path joining (and `~` expansion, done by Python's `Path.expanduser()`
+    /// in `__post_init__`) needs an allocator and real filesystem context —
+    /// deferred to the storage-layer phase. Caller owns the returned slice.
+    pub fn resolvedDbPath(self: MemoryConfig, allocator: std.mem.Allocator) ![]u8 {
+        if (self.db_path) |p| return allocator.dupe(u8, p);
+        return std.fs.path.join(allocator, &.{ self.workspace_dir, ".memweave", "index.sqlite" });
+    }
+
+    /// `workspace_dir/memory`. Caller owns the returned slice.
+    pub fn memoryDir(self: MemoryConfig, allocator: std.mem.Allocator) ![]u8 {
+        return std.fs.path.join(allocator, &.{ self.workspace_dir, "memory" });
+    }
+};
 
 test "EmbeddingConfig defaults are valid" {
-    try Embedding.validate(.{});
-}
-
-test "EmbeddingConfig carries the profile's model and batching" {
-    const cfg = EmbeddingConfig{};
-    try std.testing.expectEqualStrings("text-embedding-3-small", cfg.model);
-    try std.testing.expectEqual(@as(f64, 60.0), cfg.timeout);
-    try std.testing.expectEqual(@as(u32, 64), cfg.batch_size);
-    try std.testing.expect(cfg.api_base == null);
-    try std.testing.expect(cfg.api_key == null);
+    try (EmbeddingConfig{}).validate();
 }
 
 test "EmbeddingConfig rejects non-positive timeout and batch_size" {
-    try std.testing.expectError(error.ConfigError, Embedding.validate(.{ .timeout = 0 }));
-    try std.testing.expectError(error.ConfigError, Embedding.validate(.{ .timeout = -1 }));
-    try std.testing.expectError(error.ConfigError, Embedding.validate(.{ .batch_size = 0 }));
+    try std.testing.expectError(error.ConfigError, (EmbeddingConfig{ .timeout = 0 }).validate());
+    try std.testing.expectError(error.ConfigError, (EmbeddingConfig{ .timeout = -1 }).validate());
+    try std.testing.expectError(error.ConfigError, (EmbeddingConfig{ .batch_size = 0 }).validate());
 }
 
 test "ChunkingConfig defaults are valid and derive char budgets" {
     const c = ChunkingConfig{};
-    try Chunking.validate(c);
-    try std.testing.expectEqual(@as(u32, 400), c.tokens);
-    try std.testing.expectEqual(@as(u32, 80), c.overlap);
-    try std.testing.expectEqual(@as(u32, 1600), Chunking.ops.maxChars(c));
-    try std.testing.expectEqual(@as(u32, 320), Chunking.ops.overlapChars(c));
+    try c.validate();
+    try std.testing.expectEqual(@as(u32, 1600), c.maxChars());
+    try std.testing.expectEqual(@as(u32, 320), c.overlapChars());
 }
 
 test "ChunkingConfig max_chars floors at 32" {
     const c = ChunkingConfig{ .tokens = 1, .overlap = 0 };
-    try std.testing.expectEqual(@as(u32, 32), Chunking.ops.maxChars(c));
+    try std.testing.expectEqual(@as(u32, 32), c.maxChars());
 }
 
 test "ChunkingConfig rejects overlap >= tokens and zero tokens" {
-    try std.testing.expectError(error.ConfigError, Chunking.validate(.{ .tokens = 0 }));
-    try std.testing.expectError(error.ConfigError, Chunking.validate(.{ .tokens = 10, .overlap = 10 }));
-    try std.testing.expectError(error.ConfigError, Chunking.validate(.{ .tokens = 10, .overlap = 11 }));
+    try std.testing.expectError(error.ConfigError, (ChunkingConfig{ .tokens = 0 }).validate());
+    try std.testing.expectError(error.ConfigError, (ChunkingConfig{ .tokens = 10, .overlap = 10 }).validate());
+    try std.testing.expectError(error.ConfigError, (ChunkingConfig{ .tokens = 10, .overlap = 11 }).validate());
 }
 
 test "HybridConfig defaults are valid; weights must sum to 1.0" {
-    try Hybrid.validate(.{});
-    try std.testing.expectError(error.ConfigError, Hybrid.validate(.{ .vector_weight = 0.5, .text_weight = 0.3 }));
-    try std.testing.expectError(error.ConfigError, Hybrid.validate(.{ .vector_weight = 1.5, .text_weight = -0.5 }));
-    try std.testing.expectError(error.ConfigError, Hybrid.validate(.{ .candidate_multiplier = 0 }));
+    try (HybridConfig{}).validate();
+    try std.testing.expectError(error.ConfigError, (HybridConfig{ .vector_weight = 0.5, .text_weight = 0.3 }).validate());
+    try std.testing.expectError(error.ConfigError, (HybridConfig{ .vector_weight = 1.5, .text_weight = -0.5 }).validate());
+    try std.testing.expectError(error.ConfigError, (HybridConfig{ .candidate_multiplier = 0 }).validate());
     // within tolerance
-    try Hybrid.validate(.{ .vector_weight = 0.7000001, .text_weight = 0.2999999 });
+    try (HybridConfig{ .vector_weight = 0.7000001, .text_weight = 0.2999999 }).validate();
 }
 
 test "MMRConfig lambda_param must be in [0,1]" {
-    try MMR.validate(.{});
-    try MMR.validate(.{ .lambda_param = 0.0 });
-    try MMR.validate(.{ .lambda_param = 1.0 });
-    try std.testing.expectError(error.ConfigError, MMR.validate(.{ .lambda_param = -0.1 }));
-    try std.testing.expectError(error.ConfigError, MMR.validate(.{ .lambda_param = 1.1 }));
+    try (MMRConfig{}).validate();
+    try (MMRConfig{ .lambda_param = 0.0 }).validate();
+    try (MMRConfig{ .lambda_param = 1.0 }).validate();
+    try std.testing.expectError(error.ConfigError, (MMRConfig{ .lambda_param = -0.1 }).validate());
+    try std.testing.expectError(error.ConfigError, (MMRConfig{ .lambda_param = 1.1 }).validate());
 }
 
 test "TemporalDecayConfig half_life_days must be positive" {
-    try TemporalDecay.validate(.{});
-    try std.testing.expectEqual(@as(f64, 30.0), (TemporalDecayConfig{}).half_life_days);
-    try std.testing.expectError(error.ConfigError, TemporalDecay.validate(.{ .half_life_days = 0 }));
-    try std.testing.expectError(error.ConfigError, TemporalDecay.validate(.{ .half_life_days = -1 }));
+    try (TemporalDecayConfig{}).validate();
+    try std.testing.expectError(error.ConfigError, (TemporalDecayConfig{ .half_life_days = 0 }).validate());
+    try std.testing.expectError(error.ConfigError, (TemporalDecayConfig{ .half_life_days = -1 }).validate());
 }
 
 test "QueryConfig defaults are valid and cascade to nested configs" {
-    try Query.validate(.{});
-    try std.testing.expectError(error.ConfigError, Query.validate(.{ .max_results = 0 }));
-    try std.testing.expectError(error.ConfigError, Query.validate(.{ .min_score = 1.5 }));
-    try std.testing.expectError(error.ConfigError, Query.validate(.{ .snippet_max_chars = 0 }));
-    try std.testing.expectError(error.ConfigError, Query.validate(.{ .mmr = .{ .lambda_param = 2.0 } }));
-}
-
-test "QueryConfig composes the ranking behaviours with their own profiles" {
-    const cfg = QueryConfig{};
-    try std.testing.expectEqualStrings("hybrid", cfg.strategy);
-    try std.testing.expectEqual(@as(u32, 6), cfg.max_results);
-    try std.testing.expectEqual(@as(f64, 0.7), cfg.hybrid.vector_weight);
-    try std.testing.expectEqual(false, cfg.mmr.enabled);
-    try std.testing.expectEqual(@as(f64, 30.0), cfg.temporal_decay.half_life_days);
+    try (QueryConfig{}).validate();
+    try std.testing.expectError(error.ConfigError, (QueryConfig{ .max_results = 0 }).validate());
+    try std.testing.expectError(error.ConfigError, (QueryConfig{ .min_score = 1.5 }).validate());
+    try std.testing.expectError(error.ConfigError, (QueryConfig{ .snippet_max_chars = 0 }).validate());
+    try std.testing.expectError(error.ConfigError, (QueryConfig{ .mmr = .{ .lambda_param = 2.0 } }).validate());
 }
 
 test "CacheConfig max_entries null is unlimited and always valid" {
-    try Cache.validate(.{});
-    try std.testing.expect((CacheConfig{}).max_entries == null);
-    try Cache.validate(.{ .max_entries = 1 });
-    try std.testing.expectError(error.ConfigError, Cache.validate(.{ .max_entries = 0 }));
-}
-
-test "SyncConfig defaults sync on search only" {
-    const cfg = SyncConfig{};
-    try std.testing.expectEqual(true, cfg.on_search);
-    try std.testing.expectEqual(false, cfg.watch);
-    try std.testing.expectEqual(@as(u32, 1500), cfg.watch_debounce_ms);
-    try std.testing.expectEqual(@as(u32, 0), cfg.interval_minutes);
-}
-
-test "VectorConfig defaults to enabled with auto-detection" {
-    const cfg = VectorConfig{};
-    try std.testing.expectEqual(true, cfg.enabled);
-    try std.testing.expect(cfg.extension_path == null);
+    try (CacheConfig{}).validate();
+    try (CacheConfig{ .max_entries = 1 }).validate();
+    try std.testing.expectError(error.ConfigError, (CacheConfig{ .max_entries = 0 }).validate());
 }
 
 test "FlushConfig defaults are valid" {
-    try Flush.validate(.{});
-    try std.testing.expectError(error.ConfigError, Flush.validate(.{ .max_tokens = 0 }));
-    try std.testing.expectError(error.ConfigError, Flush.validate(.{ .temperature = 3.0 }));
-    try std.testing.expectError(error.ConfigError, Flush.validate(.{ .temperature = -0.1 }));
+    try (FlushConfig{}).validate();
+    try std.testing.expectError(error.ConfigError, (FlushConfig{ .max_tokens = 0 }).validate());
+    try std.testing.expectError(error.ConfigError, (FlushConfig{ .temperature = 3.0 }).validate());
+    try std.testing.expectError(error.ConfigError, (FlushConfig{ .temperature = -0.1 }).validate());
 }
 
 test "FlushConfig default system prompt matches the documented contract" {
     const prompt = (FlushConfig{}).system_prompt;
-    try std.testing.expectEqualStrings(default_flush_system_prompt, prompt);
     try std.testing.expect(std.mem.startsWith(u8, prompt, "Pre-compaction memory flush.\n"));
     try std.testing.expect(std.mem.endsWith(u8, prompt, "If nothing to store, reply with @@SILENT_REPLY@@."));
     try std.testing.expect(std.mem.indexOf(u8, prompt, "memory/YYYY-MM-DD.md") != null);
@@ -202,13 +273,13 @@ test "MemoryConfig defaults are valid and resolve derived paths" {
     const allocator = arena.allocator();
 
     const cfg = MemoryConfig{ .workspace_dir = "/tmp/project" };
-    try Memory.validate(cfg);
+    try cfg.validate();
 
-    const db_path = try Memory.ops.resolvedDbPath(cfg, allocator);
+    const db_path = try cfg.resolvedDbPath(allocator);
     const expected_db_path = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp/project", ".memweave", "index.sqlite" });
     try std.testing.expectEqualStrings(expected_db_path, db_path);
 
-    const mem_dir = try Memory.ops.memoryDir(cfg, allocator);
+    const mem_dir = try cfg.memoryDir(allocator);
     const expected_mem_dir = try std.fs.path.join(allocator, &[_][]const u8{ "/tmp/project", "memory" });
     try std.testing.expectEqualStrings(expected_mem_dir, mem_dir);
 }
@@ -219,7 +290,7 @@ test "MemoryConfig db_path override wins over the derived default" {
     const allocator = arena.allocator();
 
     const cfg = MemoryConfig{ .workspace_dir = "/tmp/project", .db_path = "/tmp/custom.sqlite" };
-    const db_path = try Memory.ops.resolvedDbPath(cfg, allocator);
+    const db_path = try cfg.resolvedDbPath(allocator);
     try std.testing.expectEqualStrings("/tmp/custom.sqlite", db_path);
 }
 
@@ -230,25 +301,4 @@ test "MemoryConfig evergreen_patterns and bootstrap_files defaults" {
     try std.testing.expectEqualStrings("memory.md", cfg.evergreen_patterns[1]);
     try std.testing.expectEqual(@as(usize, 1), cfg.bootstrap_files.len);
     try std.testing.expectEqualStrings("MEMORY.md", cfg.bootstrap_files[0]);
-    try std.testing.expectEqual(@as(usize, 0), cfg.extra_paths.len);
-    try std.testing.expectEqualStrings("UTC", cfg.timezone);
-    try std.testing.expectEqualStrings("~/.memweave/default", cfg.workspace_dir);
-}
-
-test "MemoryConfig validation cascades into every composed behaviour" {
-    try std.testing.expectError(error.ConfigError, Memory.validate(.{ .embedding = .{ .batch_size = 0 } }));
-    try std.testing.expectError(error.ConfigError, Memory.validate(.{ .chunking = .{ .tokens = 10, .overlap = 10 } }));
-    try std.testing.expectError(error.ConfigError, Memory.validate(.{ .query = .{ .min_score = 2.0 } }));
-    try std.testing.expectError(error.ConfigError, Memory.validate(.{ .cache = .{ .max_entries = 0 } }));
-    try std.testing.expectError(error.ConfigError, Memory.validate(.{ .flush = .{ .max_tokens = 0 } }));
-    // Two levels down: query -> hybrid.
-    try std.testing.expectError(
-        error.ConfigError,
-        Memory.validate(.{ .query = .{ .hybrid = .{ .vector_weight = 0.5, .text_weight = 0.4 } } }),
-    );
-}
-
-test "validate() returns the same error set the hand-written configs did" {
-    const E = @typeInfo(@typeInfo(@TypeOf(Memory.validate)).@"fn".return_type.?).error_union.error_set;
-    try std.testing.expectEqual(errors.ConfigError, E);
 }

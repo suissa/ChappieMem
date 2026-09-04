@@ -4,12 +4,13 @@
 //! This is the public module surface, mirroring `memweave/__init__.py`'s
 //! `__all__`. Phase 1 covers configuration, result types, the error set,
 //! and the pure, I/O-free algorithm modules (chunking, hashing, temporal
-//! decay, MMR re-ranking, vector normalization). Configuration is not
-//! hand-written: `factory` builds each config type at comptime from the
-//! `manifest.yml` + `config.yml` + `schema.yml` descriptors in the
-//! behaviour folders `behaviors` catalogues. The SQLite-backed storage
-//! layer, the search pipeline, the embedding provider, the `MemWeave`
-//! orchestrator, and the CLI land in later phases — see
+//! decay, MMR re-ranking, vector normalization). Configuration comes in two
+//! forms that are checked against each other: `config` declares the structs
+//! by hand, while `forger` re-exports the same surface built at comptime by
+//! `factory` from the `manifest.yml` + `config.yml` + `schema.yml`
+//! descriptors in the behaviour folders `behaviors` catalogues. The
+//! SQLite-backed storage layer, the search pipeline, the embedding provider,
+//! the `MemWeave` orchestrator, and the CLI land in later phases — see
 //! `docs/IMPLEMENTATION.md` (Zig port section) for the full roadmap.
 
 pub const errors = @import("errors.zig");
@@ -17,6 +18,7 @@ pub const types = @import("types.zig");
 pub const factory = @import("factory.zig");
 pub const behaviors = @import("behaviors.zig");
 pub const config = @import("config.zig");
+pub const forger = @import("forger.zig");
 pub const chunking = @import("chunking.zig");
 pub const hashing = @import("hashing.zig");
 pub const decay = @import("decay.zig");
@@ -31,6 +33,7 @@ test {
     _ = factory;
     _ = behaviors;
     _ = config;
+    _ = forger;
     _ = chunking;
     _ = hashing;
     _ = decay;
