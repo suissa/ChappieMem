@@ -12,6 +12,13 @@
 //! SQLite-backed storage layer, the search pipeline, the embedding provider,
 //! the `MemWeave` orchestrator, and the CLI land in later phases — see
 //! `docs/IMPLEMENTATION.md` (Zig port section) for the full roadmap.
+//! decay, MMR re-ranking, vector normalization). Phase 2 adds the
+//! SQLite-backed storage layer (schema + CRUD), built on the vendored
+//! `zig-sqlite`. Phase 3 adds FTS5 keyword search and score-threshold
+//! post-processing. Vector search (needs the `sqlite-vec` extension),
+//! hybrid merge, the embedding provider, the `MemWeave` orchestrator, and
+//! the CLI land in later phases — see `docs/IMPLEMENTATION.md` (Zig port
+//! section) for the full roadmap.
 
 pub const errors = @import("errors.zig");
 pub const types = @import("types.zig");
@@ -24,6 +31,15 @@ pub const hashing = @import("hashing.zig");
 pub const decay = @import("decay.zig");
 pub const mmr = @import("mmr.zig");
 pub const vectors = @import("vectors.zig");
+pub const storage = struct {
+    pub const schema = @import("storage/schema.zig");
+    pub const store = @import("storage/store.zig");
+    pub const files = @import("storage/files.zig");
+};
+pub const search = struct {
+    pub const keyword = @import("search/keyword.zig");
+    pub const postprocessor = @import("search/postprocessor.zig");
+};
 
 test {
     // Pull every submodule's tests into this root so `zig build test`
@@ -39,4 +55,9 @@ test {
     _ = decay;
     _ = mmr;
     _ = vectors;
+    _ = storage.schema;
+    _ = storage.store;
+    _ = storage.files;
+    _ = search.keyword;
+    _ = search.postprocessor;
 }
