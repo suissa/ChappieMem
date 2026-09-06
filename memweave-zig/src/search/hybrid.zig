@@ -205,3 +205,19 @@ test "mergeHybridResults honors custom weights" {
     try std.testing.expectEqual(@as(usize, 1), merged.len);
     try std.testing.expectApproxEqAbs(@as(f64, 1.0), merged[0].score, 1e-12);
 }
+
+test "mergeHybridResults preserves insertion order across duplicate ids and score ties" {
+    const vec_rows = [_]types.RawSearchRow{
+        testRow("id1", "old", 0.1, 0.1, null),
+        testRow("id2", "second", 0.5, 0.5, null),
+        testRow("id1", "new", 0.5, 0.5, null),
+    };
+
+    const merged = try mergeHybridResults(std.testing.allocator, &vec_rows, &.{}, 1.0, 0.0, null);
+    defer std.testing.allocator.free(merged);
+
+    try std.testing.expectEqual(@as(usize, 2), merged.len);
+    try std.testing.expectEqualStrings("id1", merged[0].chunk_id);
+    try std.testing.expectEqualStrings("new", merged[0].text);
+    try std.testing.expectEqualStrings("id2", merged[1].chunk_id);
+}
