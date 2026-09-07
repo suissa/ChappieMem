@@ -141,7 +141,14 @@ pub fn runStoreUnit(
             if (previous.start_line == c.start_line and previous.end_line == c.end_line) occurrence += 1;
         }
         const id = try hashing.makeChunkIdForOccurrence(
-            arena, source, doc.name, c.start_line, c.end_line, &content_hash, model, occurrence,
+            arena,
+            source,
+            doc.name,
+            c.start_line,
+            c.end_line,
+            &content_hash,
+            model,
+            occurrence,
         );
         const chunk_id = try arena.dupe(u8, &id);
         ids[i] = chunk_id;
@@ -346,7 +353,14 @@ pub fn idCollisions(gpa: std.mem.Allocator, doc: workload.Document) !IdCollision
             if (previous.start_line == c.start_line and previous.end_line == c.end_line) occurrence += 1;
         }
         const id = try hashing.makeChunkIdForOccurrence(
-            arena, source, doc.name, c.start_line, c.end_line, &content_hash, model, occurrence,
+            arena,
+            source,
+            doc.name,
+            c.start_line,
+            c.end_line,
+            &content_hash,
+            model,
+            occurrence,
         );
         ids[i] = try arena.dupe(u8, &id);
         if (!containsId(ids[0..i], ids[i])) distinct += 1;
