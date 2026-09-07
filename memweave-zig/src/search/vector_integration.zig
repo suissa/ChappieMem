@@ -21,14 +21,16 @@ fn insertFixture(
     row: Fixture,
     model: []const u8,
 ) !void {
-    db.exec(
+    const hash: []const u8 = "hash";
+
+    try db.exec(
         "INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)" ++
             " VALUES (?{[]const u8}, ?{[]const u8}, ?{[]const u8}, ?{i64}, ?{i64}, ?{[]const u8}, ?{[]const u8}, ?{[]const u8}, NULL, ?{i64})",
         .{},
-        .{ row.id, row.path, row.source, @as(i64, 1), @as(i64, 3), "hash", model, row.text, @as(i64, 1) },
+        .{ row.id, row.path, row.source, @as(i64, 1), @as(i64, 3), hash, model, row.text, @as(i64, 1) },
     );
 
-    db.exec(
+    try db.exec(
         "INSERT INTO chunks_fts (text, id, path, source, model, start_line, end_line)" ++
             " VALUES (?{[]const u8}, ?{[]const u8}, ?{[]const u8}, ?{[]const u8}, ?{[]const u8}, ?{i64}, ?{i64})",
         .{},
@@ -38,7 +40,7 @@ fn insertFixture(
     const bytes = try memweave.search.vector.serializeFloat32(allocator, &row.vec);
     defer allocator.free(bytes);
     const blob = sqlite.Blob{ .data = bytes };
-    db.exec(
+    try db.exec(
         "INSERT INTO chunks_vec (id, embedding) VALUES (?{[]const u8}, ?{blob})",
         .{},
         .{ row.id, blob },
