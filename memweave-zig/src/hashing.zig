@@ -77,6 +77,32 @@ pub fn makeChunkId(
     return sha256Hex(key);
 }
 
+/// Collision-safe variant of `makeChunkId`.
+///
+/// Occurrence zero deliberately returns the legacy ID byte-for-byte. Later
+/// occurrences append an ordinal to the hash input, so pre-split segments
+/// that share the same source line range cannot overwrite each other while
+/// ordinary chunk IDs remain stable.
+pub fn makeChunkIdForOccurrence(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    path: []const u8,
+    start_line: u32,
+    end_line: u32,
+    content_hash: []const u8,
+    model: []const u8,
+    occurrence: usize,
+) ![64]u8 {
+    if (occurrence == 0) {
+        return makeChunkId(allocator, source, path, start_line, end_line, content_hash, model);
+    }
+    const key = try std.fmt.allocPrint(allocator, "{s}:{s}:{d}:{d}:{s}:{s}:occurrence:{d}", .{
+        source, path, start_line, end_line, content_hash, model, occurrence,
+    });
+    defer allocator.free(key);
+    return sha256Hex(key);
+}
+
 /// Provider config fingerprint for the embedding cache (mirrors `make_provider_key`).
 ///
 /// `key = "{provider}:{model}:{api_base or ''}"`, then SHA-256 hex.
@@ -139,6 +165,17 @@ test "makeChunkId changes when content_hash changes" {
     const a = try makeChunkId(std.testing.allocator, "memory", "memory/x.md", 1, 5, "hash1", "model-a");
     const b = try makeChunkId(std.testing.allocator, "memory", "memory/x.md", 1, 5, "hash2", "model-a");
     try std.testing.expect(!std.mem.eql(u8, &a, &b));
+}
+
+test "makeChunkIdForOccurrence preserves legacy id and disambiguates repeated ranges" {
+    const legacy = try makeChunkId(std.testing.allocator, "memory", "memory/x.md", 1, 1, "hash1", "model-a");
+    const first = try makeChunkIdForOccurrence(std.testing.allocator, "memory", "memory/x.md", 1, 1, "hash1", "model-a", 0);
+    const second = try makeChunkIdForOccurrence(std.testing.allocator, "memory", "memory/x.md", 1, 1, "hash1", "model-a", 1);
+    const third = try makeChunkIdForOccurrence(std.testing.allocator, "memory", "memory/x.md", 1, 1, "hash1", "model-a", 2);
+
+    try std.testing.expectEqualStrings(&legacy, &first);
+    try std.testing.expect(!std.mem.eql(u8, &first, &second));
+    try std.testing.expect(!std.mem.eql(u8, &second, &third));
 }
 
 test "makeProviderKey with null api_base matches Python make_provider_key(..., None)" {
