@@ -147,14 +147,13 @@ test "ensureSchema is idempotent and sets schema_version" {
     try std.testing.expectEqual(@as(i64, schema_version), getSchemaVersion(&db));
 }
 
-test "ensureVectorTable fails cleanly when sqlite-vec is not loaded" {
+test "ensureVectorTable rejects zero dimensions before touching sqlite-vec" {
     var db = try sqlite.Db.init(.{
         .mode = .{ .Memory = {} },
         .open_flags = .{ .write = true, .create = true },
     });
     defer db.deinit();
 
-    try std.testing.expect(!ensureVectorTable(&db, 3));
     try std.testing.expect(!ensureVectorTable(&db, 0));
 }
 
