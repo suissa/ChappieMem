@@ -22,11 +22,16 @@
 //! For real numbers, read `reports/bench.json` instead.
 
 const std = @import("std");
+const memweave = @import("memweave");
 const report = @import("report.zig");
 const workload = @import("workload.zig");
+const store_workload = @import("store.zig");
 
 const Tunables = struct {
     docs: usize = 96,
+    /// Storage units are an order of magnitude heavier than pure ones (a
+    /// database round trip per chunk), so they get their own, smaller count.
+    store_units: usize = 200,
     avg_doc_bytes: usize = 6 * 1024,
     units: usize = 3000,
     /// Loose on purpose: this is a "something is catastrophically wrong"
@@ -41,6 +46,7 @@ const Params = struct {
     avg_doc_bytes: usize,
     corpus_bytes: usize,
     units: usize,
+    store_units: usize,
     max_p99_ms: f64,
 };
 
@@ -53,6 +59,7 @@ pub fn main(init: std.process.Init) !void {
 
     const docs = options.sized(tunables.docs);
     const units = options.sized(tunables.units);
+    const store_units = options.sized(tunables.store_units);
 
     var gpa_state: std.heap.DebugAllocator(.{ .enable_memory_limit = true }) = .init;
     const gpa = gpa_state.allocator();
@@ -183,6 +190,68 @@ pub fn main(init: std.process.Init) !void {
         &throughput_metrics,
     );
 
+    // ---- Sustained load on the storage layer -------------------------------
+    //
+    // The storage unit is self-inverse: it indexes a document, reads it back,
+    // searches it and deletes every row again. Running it hundreds of times
+    // against one long-lived database is where an index that never gets
+    // vacuumed, a statement that never gets finalized, or a delete that
+    // misses a table would show up.
+
+    var db = try store_workload.openMemoryDb();
+    var store = memweave.storage.store.Store.init(&db);
+
+    const store_reference = try store_workload.runStoreUnit(gpa, &db, &store, corpus.docs[0], 0);
+    const store_baseline_bytes = gpa_state.total_requested_bytes;
+
+    var store_latencies = report.Samples.init(init.gpa);
+    defer store_latencies.deinit();
+
+    var store_mismatch_at: ?usize = null;
+    var store_leak_at: ?usize = null;
+
+    const store_sw = report.Stopwatch.begin(io);
+    var s: usize = 0;
+    while (s < store_units) : (s += 1) {
+        const unit_sw = report.Stopwatch.begin(io);
+        const digest = try store_workload.runStoreUnit(gpa, &db, &store, corpus.docs[0], 0);
+        try store_latencies.add(unit_sw.elapsedNs());
+
+        if (digest != store_reference and store_mismatch_at == null) store_mismatch_at = s;
+        if (gpa_state.total_requested_bytes != store_baseline_bytes and store_leak_at == null) {
+            store_leak_at = s;
+        }
+    }
+    const store_ms = store_sw.elapsedMs();
+
+    const store_stats = store_latencies.stats();
+    var store_metrics: [9]report.Metric = undefined;
+    store_metrics[0] = .{ .name = "store_units", .value = @floatFromInt(store_units), .unit = "count" };
+    store_metrics[1] = .{
+        .name = "ops_per_sec",
+        .value = if (store_ms > 0) @as(f64, @floatFromInt(store_units)) / (store_ms / 1000.0) else 0,
+        .unit = "ops/s",
+    };
+    for (store_stats.metrics(), 2..) |m, slot| store_metrics[slot] = m;
+
+    try builder.check(
+        "every storage unit reproduces its digest against a long-lived database",
+        store_mismatch_at == null,
+        try builder.fmt("digest changed at storage unit {?d}", .{store_mismatch_at}),
+        store_ms,
+        &store_metrics,
+    );
+
+    try builder.check(
+        "the storage unit leaves no bytes outstanding once it has deleted its rows",
+        store_leak_at == null,
+        try builder.fmt("storage unit {?d} left bytes outstanding", .{store_leak_at}),
+        0,
+        &.{.{ .name = "baseline_bytes", .value = @floatFromInt(store_baseline_bytes), .unit = "bytes" }},
+    );
+
+    db.deinit();
+
     // ---- Teardown ---------------------------------------------------------
     //
     // Freed before the leak check so the corpus and the reference array are
@@ -201,6 +270,7 @@ pub fn main(init: std.process.Init) !void {
         .avg_doc_bytes = tunables.avg_doc_bytes,
         .corpus_bytes = corpus_bytes,
         .units = units,
+        .store_units = store_units,
         .max_p99_ms = tunables.max_p99_ms,
     }, options.out_dir);
 

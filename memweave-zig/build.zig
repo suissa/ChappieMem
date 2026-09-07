@@ -99,6 +99,17 @@ pub fn build(b: *std.Build) void {
         "Optimize mode for the load/stress/chaos/sync/bench suites (default: ReleaseSafe)",
     ) orelse .ReleaseSafe;
 
+    // SQLite has to be built at the same optimize mode as whatever links it:
+    // the C sources are instrumented per mode, and a Debug `libsqlite.a`
+    // linked into a ReleaseSafe binary fails with undefined `__ubsan_handle_*`
+    // symbols. `b.dependency` caches per option set, so this is the same
+    // build as above whenever the two modes coincide.
+    const perf_sqlite_dep = b.dependency("sqlite", .{
+        .target = target,
+        .optimize = perf_optimize,
+        .fts5 = true,
+    });
+
     // The same library, compiled at `perf_optimize` instead. It goes through
     // `wireSqlite` like the public module does, so the two cannot drift apart
     // when the library gains a dependency.
@@ -108,7 +119,7 @@ pub fn build(b: *std.Build) void {
         .optimize = perf_optimize,
         .link_libc = true,
     });
-    wireSqlite(perf_lib, sqlite_dep);
+    wireSqlite(perf_lib, perf_sqlite_dep);
 
     const verify_step = b.step("verify", "Run every suite -> reports/*.json");
     verify_step.dependOn(&run_tests.step);
@@ -118,7 +129,14 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path(b.fmt("testing/{s}.zig", .{suite.name})),
             .target = target,
             .optimize = perf_optimize,
-            .imports = &.{.{ .name = "memweave", .module = perf_lib }},
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "memweave", .module = perf_lib },
+                // The storage suites open their own in-memory databases, so
+                // they need the SQLite bindings directly and not only
+                // through the library.
+                .{ .name = "sqlite", .module = perf_sqlite_dep.module("sqlite") },
+            },
         });
 
         const exe = b.addExecutable(.{

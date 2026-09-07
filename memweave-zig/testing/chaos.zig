@@ -34,6 +34,7 @@ const std = @import("std");
 const memweave = @import("memweave");
 const report = @import("report.zig");
 const workload = @import("workload.zig");
+const store_workload = @import("store.zig");
 
 const chunking = memweave.chunking;
 const forger = memweave.forger;
@@ -45,6 +46,10 @@ const Tunables = struct {
     fuzz_iterations: usize = 400,
     fuzz_max_bytes: usize = 32 * 1024,
     config_iterations: usize = 5000,
+    /// Tiny: the storage unit is re-run once per allocation it makes, and a
+    /// database round trip per chunk makes that count climb fast.
+    store_injection_doc_bytes: usize = 512,
+    query_fuzz_iterations: usize = 300,
 };
 
 const Params = struct {
@@ -55,6 +60,9 @@ const Params = struct {
     fuzz_iterations: usize,
     fuzz_max_bytes: usize,
     config_iterations: usize,
+    store_injection_doc_bytes: usize,
+    store_injection_points: usize,
+    query_fuzz_iterations: usize,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -287,6 +295,127 @@ pub fn main(init: std.process.Init) !void {
         &.{},
     );
 
+    // ---- 5. Storage under fault injection ----------------------------------
+    //
+    // Each run gets its own database, so a failure injected mid-transaction
+    // cannot poison the next attempt. What is being asserted is the same as
+    // for the pure paths: the error is `OutOfMemory`, and the Zig-side
+    // allocations are all released. SQLite's own C allocations are outside
+    // this allocator and outside what a Zig test can inject into.
+
+    const store_doc: workload.Document = .{
+        .name = "memory/2025-06-06-chaos.md",
+        .text = try workload.adversarialDoc(gpa, rand, .repeated_line, tunables.store_injection_doc_bytes),
+    };
+
+    var store_probe = std.testing.FailingAllocator.init(gpa, .{});
+    _ = try store_workload.runIsolatedStoreUnit(store_probe.allocator(), store_doc, 0);
+    const store_points = store_probe.alloc_index;
+
+    var store_wrong_error: usize = 0;
+    var store_leaks: usize = 0;
+    var store_first_leak: ?usize = null;
+
+    const store_sw = report.Stopwatch.begin(io);
+    var sp: usize = 0;
+    while (sp < store_points) : (sp += 1) {
+        var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = sp });
+        if (store_workload.runIsolatedStoreUnit(failing.allocator(), store_doc, 0)) |_| {} else |err| {
+            // The storage layer collapses its failures into StorageError and
+            // SearchError, so those are legitimate outcomes here alongside
+            // OutOfMemory — what would not be is a crash or a wrong answer.
+            switch (err) {
+                error.OutOfMemory, error.StorageError, error.SearchError => {},
+                else => store_wrong_error += 1,
+            }
+        }
+        if (failing.allocated_bytes != failing.freed_bytes) {
+            store_leaks += 1;
+            if (store_first_leak == null) store_first_leak = sp;
+        }
+    }
+
+    try builder.check(
+        "the storage unit unwinds cleanly at every allocation failure",
+        store_leaks == 0 and store_wrong_error == 0,
+        try builder.fmt("{d}/{d} points leaked (first at {?d}), {d} returned an unexpected error", .{
+            store_leaks, store_points, store_first_leak, store_wrong_error,
+        }),
+        store_sw.elapsedMs(),
+        &.{
+            .{ .name = "injection_points", .value = @floatFromInt(store_points), .unit = "count" },
+            .{ .name = "leaking_points", .value = @floatFromInt(store_leaks), .unit = "count" },
+        },
+    );
+
+    // ---- 6. Query fuzzing ---------------------------------------------------
+    //
+    // FTS5 has a query language of its own, so every byte a user can type is
+    // an input to a parser. Random bytes, random operators and random quoting
+    // must all come back as results or as an error — never as a crash, and
+    // never as a different answer for the same input.
+
+    {
+        var db = try store_workload.openMemoryDb();
+        defer db.deinit();
+        var store = store_workload.Store.init(&db);
+
+        const indexed: workload.Document = .{
+            .name = "memory/2025-06-07-fuzz.md",
+            .text = try workload.adversarialDoc(gpa, rand, .repeated_line, 16 * 1024),
+        };
+        defer gpa.free(indexed.text);
+        // Index without the delete phase, so there is something to search.
+        _ = try store_workload.runStoreUnit(gpa, &db, &store, indexed, 0);
+        _ = try store_workload.runStoreUnit(gpa, &db, &store, indexed, 0);
+
+        const iterations = options.sized(tunables.query_fuzz_iterations);
+        var query_errors: usize = 0;
+        var unstable_queries: usize = 0;
+
+        const query_sw = report.Stopwatch.begin(io);
+        var q: usize = 0;
+        while (q < iterations) : (q += 1) {
+            const query = try randomQuery(gpa, rand);
+            defer gpa.free(query);
+
+            const first = memweave.search.keyword.search(gpa, &db, query, store_workload.model, 10, null) catch {
+                query_errors += 1;
+                continue;
+            };
+            defer gpa.free(first);
+
+            const second = memweave.search.keyword.search(gpa, &db, query, store_workload.model, 10, null) catch {
+                query_errors += 1;
+                continue;
+            };
+            defer gpa.free(second);
+
+            if (!sameRows(first, second)) unstable_queries += 1;
+        }
+
+        try builder.check(
+            "randomized queries never crash the FTS5 path",
+            true,
+            "",
+            query_sw.elapsedMs(),
+            &.{
+                .{ .name = "queries", .value = @floatFromInt(iterations), .unit = "count" },
+                .{ .name = "queries_erroring", .value = @floatFromInt(query_errors), .unit = "count" },
+            },
+        );
+
+        try builder.check(
+            "the same query against the same index returns the same rows",
+            unstable_queries == 0,
+            try builder.fmt("{d} quer(ies) returned different rows on a second run", .{unstable_queries}),
+            0,
+            &.{},
+        );
+    }
+
+    gpa.free(store_doc.text);
+
     // ---- Teardown ----------------------------------------------------------
 
     gpa.free(injection_doc.text);
@@ -302,6 +431,9 @@ pub fn main(init: std.process.Init) !void {
         .fuzz_iterations = fuzz_iterations,
         .fuzz_max_bytes = options.sized(tunables.fuzz_max_bytes),
         .config_iterations = config_iterations,
+        .store_injection_doc_bytes = tunables.store_injection_doc_bytes,
+        .store_injection_points = store_points,
+        .query_fuzz_iterations = options.sized(tunables.query_fuzz_iterations),
     }, options.out_dir);
 
     if (!passed) std.process.exit(1);
@@ -403,6 +535,26 @@ fn injectInto(
             .{ .name = "leaking_points", .value = @floatFromInt(leaks), .unit = "count" },
         },
     );
+}
+
+/// A query built from bytes a user could plausibly type, weighted towards
+/// the ones FTS5 gives meaning to.
+fn randomQuery(gpa: std.mem.Allocator, rand: std.Random) ![]u8 {
+    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789 \"'*()^:-+ ANDORNOT\t\n\\/{}[]<>=~!@#$%&|;,.?";
+    const len = 1 + rand.uintLessThan(usize, 64);
+    const out = try gpa.alloc(u8, len);
+    for (out) |*c| c.* = alphabet[rand.uintLessThan(usize, alphabet.len)];
+    return out;
+}
+
+fn sameRows(a: []const memweave.types.RawSearchRow, b: []const memweave.types.RawSearchRow) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| {
+        if (!std.mem.eql(u8, x.chunk_id, y.chunk_id)) return false;
+        if (x.start_line != y.start_line or x.end_line != y.end_line) return false;
+        if (x.score != y.score) return false;
+    }
+    return true;
 }
 
 fn sameChunks(a: []const chunking.MarkdownChunk, b: []const chunking.MarkdownChunk) bool {

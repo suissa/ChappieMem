@@ -86,6 +86,19 @@ any golden file:
 - in **load**, a digest that drifts over three thousand iterations means
   state leaking between them.
 
+`store.zig` does the same for everything that needs a database. Its unit
+indexes one document, reads it back, searches it, exercises the embedding
+cache and the meta table, then **deletes every row it created and asserts the
+store is empty again** — so the digest is independent of how many units ran
+before it, and the delete paths get exercised as hard as the insert paths.
+Two decisions make a database digest stable: no value ever comes from the
+wall clock, and with one document's chunks in the index at a time, FTS5's
+BM25 statistics are a function of that document alone.
+
+Vector search is not covered by these suites: it needs the `sqlite-vec`
+loadable extension, which `zig build test-vector` covers against a real
+extension in CI.
+
 `report.zig` is the shared harness — the JSON document, latency percentiles,
 argument parsing — and has its own unit tests, run as part of `zig build test`.
 
@@ -118,6 +131,21 @@ memory ceiling. At every step the chunk invariants must hold, MMR must return
 a permutation of its input, and exhaustion must surface as
 `error.OutOfMemory` rather than a crash.
 
+It also indexes and searches documents up to 512 KiB, and throws hostile FTS5
+query syntax at the search path — unterminated quotes, unbalanced parentheses,
+bare operators, an embedded NUL, a 4 KiB query — which must all be neutralized
+rather than propagated.
+
+One case is there to *document* rather than to guard. Chunk ids are derived
+from the chunk's line range, so a line longer than the chunk budget produces
+several chunks that all claim the same range, get the same id, and collapse
+into one row on insert — the rest of that line is silently lost from the
+index. This mirrors Python's `make_chunk_id` exactly, so it is a faithful port
+of an upstream limitation rather than something introduced here. The case
+asserts the loss is real and reports its size, so a future fix to the id
+derivation shows up as this case changing rather than as a silent behaviour
+change.
+
 ## chaos
 
 Four independent kinds of chaos:
@@ -136,6 +164,15 @@ Four independent kinds of chaos:
    oracle transcribed by hand from `src/behaviors/*/schema.yml`. This is the
    generated validator checked against an independent reading of the same
    rules, in both directions.
+5. **Storage fault injection.** The whole index-search-delete cycle, run once
+   per allocation it makes, each on its own database so a failure injected
+   mid-transaction cannot poison the next attempt. SQLite's own C allocations
+   are outside what a Zig allocator can inject into; the Zig side must still
+   release everything.
+6. **Query fuzzing.** FTS5 has a query language, so every byte a user can type
+   is input to a parser. Random bytes, operators and quoting must come back as
+   results or as an error — never a crash, and never a different answer for
+   the same input.
 
 This suite found three real memory-safety bugs on the out-of-memory paths of
 `src/mmr.zig` and `src/chunking.zig`; each now has a regression test next to
@@ -146,10 +183,15 @@ the code it covers.
 Establishes digests on one thread, then recomputes them from many at once.
 Three arrangements, because they fail differently: private arenas per thread
 (anything that breaks is state inside the library), one shared thread-safe
-allocator (contention and interleaved alloc/free traffic), and every thread
-on the same document at once (the sharpest test for accidental writes to
-shared data). Thread counts double from 1 to twice the CPU count, so the
-suite also runs oversubscribed.
+allocator (contention and interleaved alloc/free traffic), every thread on
+the same document at once (the sharpest test for accidental writes to shared
+data), and one in-memory database per thread running the storage unit. Thread
+counts double from 1 to twice the CPU count, so the suite also runs
+oversubscribed.
+
+Sharing one `sqlite.Db` across threads is deliberately *not* tested: a
+connection is per-user by the library's contract, and a test for the misuse
+would pin behaviour nobody should rely on.
 
 Scaling numbers are recorded but never asserted: on a shared runner the
 thread count bears no relation to the cores actually available, so a speedup
@@ -170,6 +212,18 @@ the whole batch loop and report an impressive zero. The timed bodies run on
 `std.heap.smp_allocator` rather than the `DebugAllocator` used for fixtures:
 against the debug allocator, `chunkMarkdown` on 1 KiB measured 92 µs, of
 which 86 µs was the allocator.
+
+## In CI
+
+`.github/workflows/zig.yml` runs the suites in a `memweave-zig-suites` job:
+
+```yaml
+- run: zig build verify -- --scale=0.1 --seed=0x5EED0C1
+```
+
+Every assertion executes, with a tenth of the work, and the reports are
+uploaded as build artifacts. The seed is fixed, so a CI failure reproduces
+locally verbatim with the same `--seed`.
 
 ## Adding a suite
 

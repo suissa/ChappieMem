@@ -24,8 +24,10 @@
 
 const std = @import("std");
 const memweave = @import("memweave");
+const sqlite = @import("sqlite");
 const report = @import("report.zig");
 const workload = @import("workload.zig");
+const store_workload = @import("store.zig");
 
 const chunking = memweave.chunking;
 const hashing = memweave.hashing;
@@ -249,6 +251,72 @@ pub fn main(init: std.process.Init) !void {
         }
     }.run);
 
+    // ---- Storage and search -------------------------------------------------
+    //
+    // These run against a real in-memory SQLite database. `bench_allocator`
+    // is still the Zig side; SQLite's own allocations are its business, so
+    // the numbers here are end-to-end rather than attributable to one layer.
+
+    {
+        var db = try store_workload.openMemoryDb();
+        defer db.deinit();
+        var store = store_workload.Store.init(&db);
+
+        const doc: workload.Document = .{
+            .name = "memory/2025-09-09-bench.md",
+            .text = medium,
+        };
+
+        // A populated index for the read-side benchmarks. Left in place for
+        // the search benchmarks below, and torn down with the database.
+        _ = try store_workload.runStoreUnit(gpa, &db, &store, doc, 0);
+        _ = try store_workload.runStoreUnit(gpa, &db, &store, doc, 0);
+
+        const StoreCtx = struct { db: *sqlite.Db, store: *store_workload.Store, doc: workload.Document };
+        const ctx: StoreCtx = .{ .db = &db, .store = &store, .doc = doc };
+
+        try measure(&builder, io, gpa, "store round trip (index, search, delete)", medium.len, @max(1, iterations / 8), 1, ctx, struct {
+            fn run(a: std.mem.Allocator, c: StoreCtx, _: usize) !void {
+                std.mem.doNotOptimizeAway(try store_workload.runStoreUnit(a, c.db, c.store, c.doc, 0));
+            }
+        }.run);
+
+        // Re-index so the search benchmarks have rows to find.
+        var indexed_db = try store_workload.openMemoryDb();
+        defer indexed_db.deinit();
+        var indexed_store = store_workload.Store.init(&indexed_db);
+        try indexOnly(gpa, &indexed_store, doc);
+
+        const SearchCtx = struct { db: *sqlite.Db };
+        const search_ctx: SearchCtx = .{ .db = &indexed_db };
+
+        try measure(&builder, io, gpa, "search.keyword.search (FTS5 BM25)", 0, iterations, 1, search_ctx, struct {
+            fn run(a: std.mem.Allocator, c: SearchCtx, i: usize) !void {
+                const q = store_workload.queries[i % store_workload.queries.len];
+                const hits = try memweave.search.keyword.search(a, c.db, q, store_workload.model, 10, null);
+                defer a.free(hits);
+                std.mem.doNotOptimizeAway(hits.len);
+            }
+        }.run);
+
+        try measure(&builder, io, gpa, "search.keyword.buildFtsQuery", 0, iterations, 500, {}, struct {
+            fn run(a: std.mem.Allocator, _: void, i: usize) !void {
+                const q = store_workload.queries[i % store_workload.queries.len];
+                const built = try memweave.search.keyword.buildFtsQuery(a, q);
+                defer if (built) |b| a.free(b);
+                std.mem.doNotOptimizeAway(built != null);
+            }
+        }.run);
+
+        try measure(&builder, io, gpa, "schema.ensureSchema (fresh database)", 0, @max(1, iterations / 4), 1, {}, struct {
+            fn run(_: std.mem.Allocator, _: void, _: usize) !void {
+                var fresh = try store_workload.openMemoryDb();
+                defer fresh.deinit();
+                std.mem.doNotOptimizeAway(memweave.storage.schema.getSchemaVersion(&fresh));
+            }
+        }.run);
+    }
+
     // ---- Teardown ----------------------------------------------------------
 
     corpus.deinit();
@@ -361,4 +429,26 @@ fn measure(
         .duration_ms = total_ms,
         .metrics = metrics[0..count],
     });
+}
+
+/// Index a document without the read-back, search and delete phases — just
+/// enough rows for the search benchmarks to have something to find.
+fn indexOnly(gpa: std.mem.Allocator, store: *store_workload.Store, doc: workload.Document) !void {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const content_hash = hashing.sha256Text(doc.text);
+    try store.upsertFile(doc.name, "memory", &content_hash, 1_700_000_000.0, @intCast(doc.text.len));
+
+    const chunks = try chunking.chunkMarkdown(gpa, doc.text, workload.chunk_tokens, workload.chunk_overlap);
+    defer chunking.freeChunks(gpa, chunks);
+
+    for (chunks) |c| {
+        const id = try hashing.makeChunkId(arena, "memory", doc.name, c.start_line, c.end_line, &content_hash, store_workload.model);
+        const chunk_id = try arena.dupe(u8, &id);
+        try store.upsertChunk(arena, chunk_id, doc.name, "memory", c.start_line, c.end_line, &content_hash, store_workload.model, c.text, null, 1_700_000_000);
+        try store.upsertFts(c.text, chunk_id, doc.name, "memory", c.start_line, c.end_line, store_workload.model);
+    }
+    try store.commit();
 }

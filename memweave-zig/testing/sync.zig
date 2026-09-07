@@ -30,6 +30,7 @@
 const std = @import("std");
 const report = @import("report.zig");
 const workload = @import("workload.zig");
+const store_workload = @import("store.zig");
 
 const Tunables = struct {
     docs: usize = 48,
@@ -39,6 +40,9 @@ const Tunables = struct {
     /// Thread counts are doubled from 1 up to this multiple of the CPU count,
     /// so the suite also runs oversubscribed.
     max_oversubscription: u32 = 2,
+    /// Storage iterations per thread. Lower than the pure count: each one is
+    /// a full index-search-delete cycle against a real database.
+    store_iterations_per_thread: usize = 20,
 };
 
 const Params = struct {
@@ -50,6 +54,7 @@ const Params = struct {
     cpu_count: u32,
     max_threads: u32,
     single_thread_ops_per_sec: f64,
+    store_iterations_per_thread: usize,
 };
 
 /// What one worker needs. Everything behind a `*const` is shared and must
@@ -203,6 +208,62 @@ pub fn main(init: std.process.Init) !void {
         try recordArrangement(&builder, "same document on every thread", max_threads, outcome, single_thread_ops);
     }
 
+    // ---- 4. The storage layer, one database per thread ---------------------
+    //
+    // A `sqlite.Db` is a connection, and the library's contract is one
+    // connection per user — so the arrangement under test is each thread
+    // opening its own in-memory database and running the same unit. What
+    // that proves is that nothing between the connections is shared: no
+    // process-global statement cache, no static scratch buffer, no lazily
+    // initialized singleton in the storage or search layer.
+    //
+    // Sharing one connection across threads is deliberately *not* tested:
+    // that is a misuse of the API, and a test for it would pin behaviour
+    // nobody should rely on.
+
+    const store_iterations = options.sized(tunables.store_iterations_per_thread);
+    const store_doc = corpus.docs[0];
+
+    const store_reference = ref: {
+        var db = try store_workload.openMemoryDb();
+        defer db.deinit();
+        var store = store_workload.Store.init(&db);
+        break :ref try store_workload.runStoreUnit(gpa, &db, &store, store_doc, 0);
+    };
+
+    threads = 1;
+    while (threads <= max_threads) : (threads *= 2) {
+        var mismatches: std.atomic.Value(u64) = .init(0);
+        var completed: std.atomic.Value(u64) = .init(0);
+        var failures: std.atomic.Value(u64) = .init(0);
+
+        const handles = try gpa.alloc(std.Thread, threads);
+        defer gpa.free(handles);
+
+        const sw = report.Stopwatch.begin(io);
+        for (handles) |*handle| {
+            handle.* = try std.Thread.spawn(.{}, storeWorker, .{StoreWorker{
+                .backing = gpa,
+                .doc = store_doc,
+                .reference = store_reference,
+                .iterations = store_iterations,
+                .mismatches = &mismatches,
+                .completed = &completed,
+                .failures = &failures,
+            }});
+        }
+        for (handles) |handle| handle.join();
+
+        const outcome: Outcome = .{
+            .mismatches = mismatches.load(.seq_cst),
+            .failures = failures.load(.seq_cst),
+            .completed = completed.load(.seq_cst),
+            .expected = @as(u64, threads) * store_iterations,
+            .wall_ms = sw.elapsedMs(),
+        };
+        try recordArrangement(&builder, "one database per thread", threads, outcome, single_thread_ops);
+    }
+
     // ---- Teardown ---------------------------------------------------------
 
     corpus.deinit();
@@ -219,9 +280,45 @@ pub fn main(init: std.process.Init) !void {
         .cpu_count = cpu_count,
         .max_threads = max_threads,
         .single_thread_ops_per_sec = single_thread_ops,
+        .store_iterations_per_thread = store_iterations,
     }, options.out_dir);
 
     if (!passed) std.process.exit(1);
+}
+
+/// One thread's share of the storage arrangement: its own connection, its
+/// own arena, the same document.
+const StoreWorker = struct {
+    backing: std.mem.Allocator,
+    doc: workload.Document,
+    reference: u64,
+    iterations: usize,
+    mismatches: *std.atomic.Value(u64),
+    completed: *std.atomic.Value(u64),
+    failures: *std.atomic.Value(u64),
+};
+
+fn storeWorker(self: StoreWorker) void {
+    var db = store_workload.openMemoryDb() catch {
+        _ = self.failures.fetchAdd(self.iterations, .monotonic);
+        return;
+    };
+    defer db.deinit();
+    var store = store_workload.Store.init(&db);
+
+    var arena_state = std.heap.ArenaAllocator.init(self.backing);
+    defer arena_state.deinit();
+
+    var i: usize = 0;
+    while (i < self.iterations) : (i += 1) {
+        const digest = store_workload.runStoreUnit(arena_state.allocator(), &db, &store, self.doc, 0) catch {
+            _ = self.failures.fetchAdd(1, .monotonic);
+            continue;
+        };
+        if (digest != self.reference) _ = self.mismatches.fetchAdd(1, .monotonic);
+        _ = self.completed.fetchAdd(1, .monotonic);
+        _ = arena_state.reset(.retain_capacity);
+    }
 }
 
 const Arrangement = struct {
