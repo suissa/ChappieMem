@@ -136,15 +136,12 @@ query syntax at the search path — unterminated quotes, unbalanced parentheses,
 bare operators, an embedded NUL, a 4 KiB query — which must all be neutralized
 rather than propagated.
 
-One case is there to *document* rather than to guard. Chunk ids are derived
-from the chunk's line range, so a line longer than the chunk budget produces
-several chunks that all claim the same range, get the same id, and collapse
-into one row on insert — the rest of that line is silently lost from the
-index. This mirrors Python's `make_chunk_id` exactly, so it is a faithful port
-of an upstream limitation rather than something introduced here. The case
-asserts the loss is real and reports its size, so a future fix to the id
-derivation shows up as this case changing rather than as a silent behaviour
-change.
+One case guards the over-long-line boundary. Pre-splitting gives every
+segment of one source line the same line range, so the first segment keeps
+the legacy chunk id and later occurrences add a stable ordinal to the hash
+input. The test requires one distinct id and one stored row per chunk. This
+keeps ordinary and first-occurrence ids compatible while preventing SQLite
+`INSERT OR REPLACE` from silently discarding later segments.
 
 ## chaos
 
