@@ -104,3 +104,39 @@ jobs:
       - name: Run tests
         working-directory: memweave-zig
         run: zig build test --summary all
+
+  memweave-zig-vector-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Ensure zig package-fetch tmp dir exists
+        shell: bash
+        run: mkdir -p "$ZIG_GLOBAL_CACHE_DIR/tmp"
+
+      # Pin the latest stable sqlite-vec release used by this port. The
+      # checksum comes from the release metadata; this keeps the integration
+      # signal reproducible instead of executing a moving binary.
+      - name: Download sqlite-vec v0.1.9
+        shell: bash
+        run: |
+          curl -fsSL \
+            https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz \
+            -o sqlite-vec.tar.gz
+          echo "b959baa1d8dc88861b1edb337b8587178cdcb12d60b4998f9d10b6a82052d5d7  sqlite-vec.tar.gz" | sha256sum -c -
+          mkdir sqlite-vec
+          tar -xzf sqlite-vec.tar.gz -C sqlite-vec
+          SQLITE_VEC_EXTENSION="$(find "$GITHUB_WORKSPACE/sqlite-vec" -type f -name 'vec0.so' -print -quit)"
+          test -n "$SQLITE_VEC_EXTENSION"
+          echo "SQLITE_VEC_EXTENSION=$SQLITE_VEC_EXTENSION" >> "$GITHUB_ENV"
+
+      - name: Run real sqlite-vec vector + hybrid integration test
+        working-directory: memweave-zig
+        shell: bash
+        run: zig build test-vector -Dsqlite-vec-extension="$SQLITE_VEC_EXTENSION" --summary all
