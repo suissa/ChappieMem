@@ -263,7 +263,7 @@ pub const Store = struct {
         var stmt = self.db.prepare(
             \\SELECT id, path, source, start_line, end_line, hash, model, text, embedding, updated_at
             \\FROM chunks WHERE path = ?{[]const u8}
-            \\ORDER BY start_line
+            \\ORDER BY start_line, id
         ) catch return error.StorageError;
         defer stmt.deinit();
 
