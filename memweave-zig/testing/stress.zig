@@ -267,18 +267,8 @@ pub fn main(init: std.process.Init) !void {
             );
         }
 
-        // Chunk ids are derived from the chunk's line range, so a line
-        // longer than the chunk budget produces several chunks that all
-        // claim the same range — and therefore the same id. On insert they
-        // collapse into one row and the rest of the line is silently lost
-        // from the index.
-        //
-        // This mirrors Python's `make_chunk_id` exactly, so it is a faithful
-        // port of an upstream limitation rather than a defect introduced
-        // here. The case is written to *document* it: it asserts the loss is
-        // real and reports its size, so a future fix to the id derivation
-        // shows up as this case changing rather than as a silent behaviour
-        // change.
+        // Pre-split segments of an over-long line share line metadata. The
+        // occurrence-aware ID must keep every segment distinct.
         {
             const long_line: workload.Document = .{
                 .name = "memory/2025-08-10-one-long-line.md",
@@ -288,21 +278,21 @@ pub fn main(init: std.process.Init) !void {
 
             const collisions = try store_workload.idCollisions(gpa, long_line);
             try builder.check(
-                "documented: chunk ids collide when one line exceeds the chunk budget",
-                collisions.chunks > 1 and collisions.distinct_ids == 1,
+                "over-long source lines retain every pre-split chunk",
+                collisions.chunks > 1 and collisions.distinct_ids == collisions.chunks,
                 try builder.fmt(
-                    "expected many chunks collapsing to a single id, got {d} chunks and {d} ids",
+                    "expected one id per chunk, got {d} chunks and {d} ids",
                     .{ collisions.chunks, collisions.distinct_ids },
                 ),
                 0,
                 &.{
                     .{ .name = "chunks_produced", .value = @floatFromInt(collisions.chunks), .unit = "count" },
                     .{ .name = "distinct_chunk_ids", .value = @floatFromInt(collisions.distinct_ids), .unit = "count" },
-                    .{ .name = "chunks_lost_on_insert", .value = @floatFromInt(collisions.collapsed()), .unit = "count" },
+                    .{ .name = "duplicate_chunk_ids", .value = @floatFromInt(collisions.collapsed()), .unit = "count" },
                 },
             );
 
-            // A normal document, by contrast, must not lose anything.
+            // Ordinary multi-line documents retain the same invariant.
             const ordinary: workload.Document = .{
                 .name = "memory/2025-08-11-ordinary.md",
                 .text = try workload.adversarialDoc(gpa, rand, .repeated_line, 64 * 1024),
@@ -311,7 +301,7 @@ pub fn main(init: std.process.Init) !void {
 
             const ordinary_collisions = try store_workload.idCollisions(gpa, ordinary);
             try builder.check(
-                "a document of ordinary lines loses no chunks to id collisions",
+                "ordinary lines retain one id per chunk",
                 ordinary_collisions.collapsed() == 0,
                 try builder.fmt("{d} of {d} chunks collapsed", .{
                     ordinary_collisions.collapsed(),
@@ -320,7 +310,7 @@ pub fn main(init: std.process.Init) !void {
                 0,
                 &.{
                     .{ .name = "chunks_produced", .value = @floatFromInt(ordinary_collisions.chunks), .unit = "count" },
-                    .{ .name = "chunks_lost_on_insert", .value = @floatFromInt(ordinary_collisions.collapsed()), .unit = "count" },
+                    .{ .name = "duplicate_chunk_ids", .value = @floatFromInt(ordinary_collisions.collapsed()), .unit = "count" },
                 },
             );
         }
