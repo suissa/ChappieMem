@@ -1,23 +1,80 @@
-//! Weighted merge of vector + keyword search results, ported from
-//! `memweave/search/hybrid.py`'s `merge_hybrid_results`.
+//! Weighted vector + keyword hybrid search, ported from
+//! `memweave/search/hybrid.py`.
 //!
 //! `combined_score = vector_weight * vector_score + text_weight * text_score`,
 //! with a missing component (a chunk found by only one backend) treated as
-//! 0. This module covers only the merge — it has no SQLite dependency.
-//! `VectorSearch`/`HybridSearch.search()` themselves need the `sqlite-vec`
-//! extension, which isn't wired into this Zig port yet (a separate,
-//! substantial C-extension integration), so they're deferred to a later
-//! phase. `KeywordSearch.search()` (search/keyword.zig) already exists and
-//! can be fed into this function directly once vector search lands.
+//! 0. The merge remains pure; `search` composes the sqlite-vec vector backend
+//! with FTS5 keyword search using the same candidate-pool semantics as Python.
 
 const std = @import("std");
+const sqlite = @import("sqlite");
 const types = @import("../types.zig");
+const keyword = @import("keyword.zig");
+const vector = @import("vector.zig");
 
 const MergeEntry = struct {
     row: types.RawSearchRow,
     vector_score: f64,
     text_score: f64,
 };
+
+pub const SearchOptions = struct {
+    vector_weight: f64 = 0.7,
+    text_weight: f64 = 0.3,
+    candidate_multiplier: usize = 4,
+};
+
+/// Run vector and keyword search with `limit * candidate_multiplier`
+/// candidates per backend, then merge and truncate to `limit`.
+///
+/// Like the Python implementation, vector failure is not silently downgraded
+/// to keyword-only search: sqlite-vec unavailability propagates to the caller.
+pub fn search(
+    allocator: std.mem.Allocator,
+    db: *sqlite.Db,
+    query: []const u8,
+    query_vec: ?[]const f32,
+    model: []const u8,
+    limit: usize,
+    source_filter: ?[]const u8,
+    options: SearchOptions,
+) vector.VectorError![]types.RawSearchRow {
+    const pool_mul = @mulWithOverflow(limit, options.candidate_multiplier);
+    if (pool_mul[1] != 0 or pool_mul[0] > std.math.maxInt(i64)) {
+        return error.SearchError;
+    }
+    const pool: i64 = @intCast(pool_mul[0]);
+
+    const vector_rows = try vector.search(
+        allocator,
+        db,
+        query,
+        query_vec,
+        model,
+        pool,
+        source_filter,
+    );
+    defer allocator.free(vector_rows);
+
+    const keyword_rows = try keyword.search(
+        allocator,
+        db,
+        query,
+        model,
+        pool,
+        source_filter,
+    );
+    defer allocator.free(keyword_rows);
+
+    return mergeHybridResults(
+        allocator,
+        vector_rows,
+        keyword_rows,
+        options.vector_weight,
+        options.text_weight,
+        limit,
+    ) catch return error.SearchError;
+}
 
 /// Merge vector and keyword results into a single ranked list (mirrors
 /// `merge_hybrid_results`).
