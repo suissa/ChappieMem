@@ -129,22 +129,23 @@ pub fn runStoreUnit(
     const chunks = try chunking.chunkMarkdown(gpa, doc.text, workload.chunk_tokens, workload.chunk_overlap);
     defer chunking.freeChunks(gpa, chunks);
 
-    // A chunk id is derived from (source, path, start_line, end_line,
-    // content_hash, model) — see `hashing.makeChunkId`, which mirrors
-    // Python's. Two chunks that cover the same line range therefore get the
-    // same id and collapse into one row on `INSERT OR REPLACE`. That happens
-    // whenever a single line exceeds the chunk budget: the chunker pre-splits
-    // it into segments that all carry that line's number. So the row count to
-    // expect is the number of *distinct* ids, not the number of chunks.
-    // `stress` measures how far the two diverge.
-    var distinct_ids: usize = 0;
+    // Preserve the legacy ID for the first occurrence of a line range, then
+    // disambiguate repeated ranges with a stable occurrence ordinal. This is
+    // needed for over-long source lines, whose pre-split segments all carry
+    // the same start/end line.
     const ids = try arena.alloc([]const u8, chunks.len);
 
     for (chunks, 0..) |c, i| {
-        const id = try hashing.makeChunkId(arena, source, doc.name, c.start_line, c.end_line, &content_hash, model);
+        var occurrence: usize = 0;
+        for (chunks[0..i]) |previous| {
+            if (previous.start_line == c.start_line and previous.end_line == c.end_line) occurrence += 1;
+        }
+        const id = try hashing.makeChunkIdForOccurrence(
+            arena, source, doc.name, c.start_line, c.end_line, &content_hash, model, occurrence,
+        );
         const chunk_id = try arena.dupe(u8, &id);
         ids[i] = chunk_id;
-        if (!containsId(ids[0..i], chunk_id)) distinct_ids += 1;
+        if (containsId(ids[0..i], chunk_id)) return error.DuplicateChunkId;
         const embedding = try embeddingFor(arena, c.text);
         const chunk_hash_bytes = hashing.sha256Text(c.text);
         const chunk_hash = try arena.dupe(u8, &chunk_hash_bytes);
@@ -191,8 +192,8 @@ pub fn runStoreUnit(
 
     const stored_chunks = try store.getChunksByPath(arena, doc.name);
     d.int(stored_chunks.len);
-    d.int(distinct_ids);
-    if (stored_chunks.len != distinct_ids) return error.ChunkCountMismatch;
+    d.int(chunks.len);
+    if (stored_chunks.len != chunks.len) return error.ChunkCountMismatch;
     for (stored_chunks) |c| {
         d.bytes(c.id);
         d.int(c.start_line);
@@ -313,8 +314,8 @@ fn containsId(seen: []const []const u8, id: []const u8) bool {
     return false;
 }
 
-/// How many chunks a document produces, and how many distinct ids those
-/// chunks carry. The two differ exactly when a line exceeds the chunk budget.
+/// How many chunks a document produces, and how many collision-safe ids they
+/// carry. These counts must always agree.
 pub const IdCollisions = struct {
     chunks: usize,
     distinct_ids: usize,
@@ -340,7 +341,13 @@ pub fn idCollisions(gpa: std.mem.Allocator, doc: workload.Document) !IdCollision
     const ids = try arena.alloc([]const u8, chunks.len);
     var distinct: usize = 0;
     for (chunks, 0..) |c, i| {
-        const id = try hashing.makeChunkId(arena, source, doc.name, c.start_line, c.end_line, &content_hash, model);
+        var occurrence: usize = 0;
+        for (chunks[0..i]) |previous| {
+            if (previous.start_line == c.start_line and previous.end_line == c.end_line) occurrence += 1;
+        }
+        const id = try hashing.makeChunkIdForOccurrence(
+            arena, source, doc.name, c.start_line, c.end_line, &content_hash, model, occurrence,
+        );
         ids[i] = try arena.dupe(u8, &id);
         if (!containsId(ids[0..i], ids[i])) distinct += 1;
     }
