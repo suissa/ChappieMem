@@ -4,14 +4,6 @@
 //! This is the public module surface, mirroring `memweave/__init__.py`'s
 //! `__all__`. Phase 1 covers configuration, result types, the error set,
 //! and the pure, I/O-free algorithm modules (chunking, hashing, temporal
-//! decay, MMR re-ranking, vector normalization). Configuration comes in two
-//! forms that are checked against each other: `config` declares the structs
-//! by hand, while `forger` re-exports the same surface built at comptime by
-//! `factory` from the `manifest.yml` + `config.yml` + `schema.yml`
-//! descriptors in the behaviour folders `behaviors` catalogues. The
-//! SQLite-backed storage layer, the search pipeline, the embedding provider,
-//! the `MemWeave` orchestrator, and the CLI land in later phases — see
-//! `docs/IMPLEMENTATION.md` (Zig port section) for the full roadmap.
 //! decay, MMR re-ranking, vector normalization). Phase 2 adds the
 //! SQLite-backed storage layer (schema + CRUD), built on the vendored
 //! `zig-sqlite`. Phase 3 adds FTS5 keyword search, sqlite-vec vector search,
@@ -19,6 +11,15 @@
 //! The embedding provider, the `MemWeave` orchestrator, and the CLI land in
 //! later phases — see `docs/IMPLEMENTATION.md` (Zig port section) for the
 //! full roadmap.
+//!
+//! Configuration comes in two forms that are checked against each other:
+//! `config` declares the structs by hand, while `forger` re-exports the same
+//! surface built at comptime by `factory` from the `manifest.yml` +
+//! `config.yml` + `schema.yml` descriptors in the behaviour folders that
+//! `behaviors` catalogues.
+//!
+//! The test suites live outside this module, in `testing/` — see
+//! `testing/README.md`.
 
 pub const errors = @import("errors.zig");
 pub const types = @import("types.zig");
