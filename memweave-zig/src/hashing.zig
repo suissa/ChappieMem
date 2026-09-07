@@ -178,6 +178,9 @@ test "sha256File hashes a temp file's contents" {
     const io = threaded.io();
 
     const path = "hashing_test_sha256file_tmp.txt";
+    // Written into the working directory, so remove it again — otherwise
+    // every `zig build test` leaves a stray file behind.
+    defer std.Io.Dir.cwd().deleteFile(io, path) catch {};
     {
         var file = try std.Io.Dir.cwd().createFile(io, path, .{});
         defer file.close(io);
