@@ -1,0 +1,40 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    workspace_dir:
+      type: string
+      doc: "Root of the memory workspace. Markdown in, index alongside."
+    db_path:
+      type: ?string
+      default: null
+      doc: "Null derives workspace_dir/.memweave/index.sqlite — see ops.resolvedDbPath."
+    timezone:
+      type: string
+      doc: "Timezone used to name and date memory files."
+    embedding:
+      type: behavior<embedding>
+    chunking:
+      type: behavior<chunking>
+    query:
+      type: behavior<query>
+    cache:
+      type: behavior<cache>
+    sync:
+      type: behavior<sync>
+    flush:
+      type: behavior<flush>
+    vector:
+      type: behavior<vector>
+    progress:
+      type: bool
+      doc: "Show progress while indexing."
+    extra_paths:
+      type: list<string>
+      doc: "Additional directories indexed alongside the workspace."
+    bootstrap_files:
+      type: list<string>
+      doc: "Files loaded into context at session start."
+    evergreen_patterns:
+      type: list<string>
+      doc: "Filenames exempt from temporal decay: reference material that does not go stale."

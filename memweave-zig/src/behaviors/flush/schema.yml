@@ -1,0 +1,24 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    enabled:
+      type: bool
+      doc: "Run the flush when the agent is about to lose context."
+    model:
+      type: string
+      doc: "Chat model that decides what is worth keeping. A small one is plenty."
+    max_tokens:
+      type: u32
+      doc: "Ceiling on the flush completion."
+      constraints:
+        gte: 1
+    temperature:
+      type: f64
+      doc: "0.0 keeps the flush faithful to what was said rather than inventive."
+      constraints:
+        gte: 0
+        lte: 2
+    system_prompt:
+      type: string
+      doc: "The contract the flush model must follow. Append-only, canonical filenames, silent when empty."

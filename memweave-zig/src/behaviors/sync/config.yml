@@ -1,0 +1,12 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: sync
+  profile: default
+  doc: "Sync lazily on search; no watcher, no timer, no background threads."
+spec:
+  values:
+    on_search: true
+    watch: false
+    watch_debounce_ms: 1500
+    interval_minutes: 0

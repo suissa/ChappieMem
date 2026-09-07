@@ -1,0 +1,18 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    tokens:
+      type: u32
+      doc: "Target chunk size in tokens. Smaller is more precise, larger keeps more context."
+      constraints:
+        gte: 1
+    overlap:
+      type: u32
+      doc: "Tokens repeated between consecutive chunks so a sentence on a boundary is retrievable from both."
+  invariants:
+    overlap_fits_in_chunk:
+      rule: lt
+      left: overlap
+      right: tokens
+      doc: "An overlap at least as large as the chunk would make every chunk identical."

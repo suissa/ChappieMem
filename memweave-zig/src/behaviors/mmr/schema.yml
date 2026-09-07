@@ -1,0 +1,13 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    enabled:
+      type: bool
+      doc: "Off by default: MMR costs an extra pass and only pays off on redundant corpora."
+    lambda_param:
+      type: f64
+      doc: "1.0 is pure relevance, 0.0 is pure diversity."
+      constraints:
+        gte: 0
+        lte: 1

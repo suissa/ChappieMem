@@ -1,0 +1,13 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    enabled:
+      type: bool
+      doc: "Skip re-embedding chunks whose content hash is unchanged."
+    max_entries:
+      type: ?u32
+      default: null
+      doc: "Null means unlimited; otherwise LRU eviction by updated_at once the cache exceeds this."
+      constraints:
+        gte: 1

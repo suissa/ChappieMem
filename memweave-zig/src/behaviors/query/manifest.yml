@@ -1,0 +1,16 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: query
+  version: 0.1.0
+  summary: "Retrieval shape: how many results, how good they must be, how they are ranked."
+  tags: [search]
+spec:
+  stability: stable
+  pure: true
+  # Ranking is three independent decisions. Each stays its own behaviour with
+  # its own rules; this one only decides which of them are in play.
+  composes: [hybrid, mmr, temporal_decay]
+  parity:
+    python: memweave.config.QueryConfig
+  consumers: []

@@ -1,0 +1,10 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: chunking
+  profile: default
+  doc: "Sized for text-embedding-3-small, whose window is 8191 tokens."
+spec:
+  values:
+    tokens: 400
+    overlap: 80

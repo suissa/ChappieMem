@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: cache
+  version: 0.1.0
+  summary: "Reuse of previously computed embeddings across runs."
+  tags: [indexing, cost]
+spec:
+  stability: stable
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.CacheConfig
+  consumers: []

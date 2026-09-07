@@ -1,0 +1,11 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: hybrid
+  profile: default
+  doc: "Semantic-leaning blend: keywords break ties rather than drive the ranking."
+spec:
+  values:
+    vector_weight: 0.7
+    text_weight: 0.3
+    candidate_multiplier: 4

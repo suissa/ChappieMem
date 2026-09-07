@@ -1,0 +1,16 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: embedding
+  version: 0.1.0
+  summary: "Which model turns text into vectors, and how it is called."
+  tags: [embedding, provider, network]
+spec:
+  stability: stable
+  # No I/O happens here — this behaviour only carries the settings the
+  # provider will later be driven with.
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.EmbeddingConfig
+  consumers: []

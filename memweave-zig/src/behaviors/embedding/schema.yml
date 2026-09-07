@@ -1,0 +1,25 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    model:
+      type: string
+      doc: "Any LiteLLM-supported embedding model (100+ providers)."
+    api_base:
+      type: ?string
+      default: null
+      doc: "Custom API base URL, e.g. a local Ollama server."
+    api_key:
+      type: ?string
+      default: null
+      doc: "Explicit API key. Null means read it from the environment."
+    timeout:
+      type: f64
+      doc: "Seconds allowed per API call before it times out."
+      constraints:
+        gt: 0
+    batch_size:
+      type: u32
+      doc: "Maximum number of texts sent in one batched embedding call."
+      constraints:
+        gte: 1

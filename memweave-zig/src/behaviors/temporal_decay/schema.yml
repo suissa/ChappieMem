@@ -1,0 +1,12 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    enabled:
+      type: bool
+      doc: "Off by default: decay is wrong for reference material that does not age."
+    half_life_days:
+      type: f64
+      doc: "Days after which a score is halved. lambda = ln(2) / half_life_days."
+      constraints:
+        gt: 0

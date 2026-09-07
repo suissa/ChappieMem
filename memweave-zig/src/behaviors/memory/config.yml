@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: memory
+  profile: default
+  doc: "A single shared workspace under the user's home directory."
+spec:
+  values:
+    workspace_dir: "~/.memweave/default"
+    timezone: "UTC"
+    progress: true
+    extra_paths: []
+    bootstrap_files: ["MEMORY.md"]
+    evergreen_patterns: ["MEMORY.md", "memory.md"]

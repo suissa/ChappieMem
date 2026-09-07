@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: temporal_decay
+  version: 0.1.0
+  summary: "Exponential age penalty so recent memories outrank stale ones."
+  tags: [search, ranking, time]
+spec:
+  stability: stable
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.TemporalDecayConfig
+  consumers: [src/decay.zig]

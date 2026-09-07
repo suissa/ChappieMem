@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: memory
+  version: 0.1.0
+  summary: "The whole store: a workspace, an index, and the behaviours that act on them."
+  tags: [root, composite]
+spec:
+  stability: stable
+  pure: true
+  composes: [embedding, chunking, query, cache, sync, flush, vector]
+  parity:
+    python: memweave.config.MemoryConfig
+  consumers: []

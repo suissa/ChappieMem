@@ -1,0 +1,9 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: cache
+  profile: default
+  doc: "On and unbounded: embeddings cost money, disk does not."
+spec:
+  values:
+    enabled: true

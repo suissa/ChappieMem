@@ -1,0 +1,11 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorSchema
+spec:
+  fields:
+    enabled:
+      type: bool
+      doc: "Use sqlite-vec for similarity search. Disabled falls back to keyword-only retrieval."
+    extension_path:
+      type: ?string
+      default: null
+      doc: "Null auto-detects the loadable extension; set it when the library sits somewhere unusual."

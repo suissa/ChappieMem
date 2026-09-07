@@ -1,0 +1,14 @@
+apiVersion: memweave.behavior/v1
+kind: AtomicBehavior
+metadata:
+  name: mmr
+  version: 0.1.0
+  summary: "Maximal Marginal Relevance re-ranking: trade relevance for diversity."
+  tags: [search, ranking, diversity]
+spec:
+  stability: stable
+  pure: true
+  composes: []
+  parity:
+    python: memweave.config.MMRConfig
+  consumers: [src/mmr.zig]

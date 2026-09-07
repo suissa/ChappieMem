@@ -1,0 +1,10 @@
+apiVersion: memweave.behavior/v1
+kind: BehaviorConfig
+metadata:
+  behavior: temporal_decay
+  profile: default
+  doc: "A month-long half-life: last week's notes clearly win, last quarter's still surface."
+spec:
+  values:
+    enabled: false
+    half_life_days: 30.0
