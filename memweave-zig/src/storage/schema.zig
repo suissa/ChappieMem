@@ -2,9 +2,9 @@
 //! `memweave/storage/schema.py`.
 //!
 //! `ensureSchema` is idempotent (every statement is `CREATE ... IF NOT
-//! EXISTS`) and safe to call on every startup. `chunks_vec` (the sqlite-vec
-//! ANN table) is deferred to a later phase — it requires an extension to be
-//! loaded first, and this port doesn't wire that up yet.
+//! EXISTS`) and safe to call on every startup. `chunks_vec` is intentionally
+//! separate: sqlite-vec must be loaded into the connection first, and the
+//! embedding dimensionality is only known once a real model vector exists.
 
 const std = @import("std");
 const sqlite = @import("sqlite");
@@ -101,6 +101,27 @@ pub fn ensureSchema(db: *sqlite.Db) errors.StorageError!void {
     ) catch return error.StorageError;
 }
 
+/// Create `chunks_vec` after sqlite-vec has been loaded into `db`.
+///
+/// sqlite-vec requires FLOAT dimensionality at table creation time, so this is
+/// deliberately separate from `ensureSchema`, matching Python's
+/// `ensure_vector_table`. Returns false if the extension is unavailable,
+/// `dims` is zero, or SQLite rejects the virtual table definition.
+pub fn ensureVectorTable(db: *sqlite.Db, dims: usize) bool {
+    if (dims == 0) return false;
+
+    var sql_buf: [256]u8 = undefined;
+    const sql = std.fmt.bufPrint(
+        &sql_buf,
+        "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(" ++
+            "id TEXT PRIMARY KEY, embedding FLOAT[{d}])",
+        .{dims},
+    ) catch return false;
+
+    db.execDynamic(sql, .{}, .{}) catch return false;
+    return true;
+}
+
 /// Return the stored schema version from `meta`, or 0 if unset (mirrors
 /// `get_schema_version`).
 pub fn getSchemaVersion(db: *sqlite.Db) i64 {
@@ -124,6 +145,17 @@ test "ensureSchema is idempotent and sets schema_version" {
     try ensureSchema(&db);
 
     try std.testing.expectEqual(@as(i64, schema_version), getSchemaVersion(&db));
+}
+
+test "ensureVectorTable fails cleanly when sqlite-vec is not loaded" {
+    var db = try sqlite.Db.init(.{
+        .mode = .{ .Memory = {} },
+        .open_flags = .{ .write = true, .create = true },
+    });
+    defer db.deinit();
+
+    try std.testing.expect(!ensureVectorTable(&db, 3));
+    try std.testing.expect(!ensureVectorTable(&db, 0));
 }
 
 test "getSchemaVersion returns 0 on a fresh database with no meta table" {
