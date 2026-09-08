@@ -95,6 +95,10 @@ pub fn chunkText(
 ) ![][]const u8 {
     const chunks = try chunkMarkdown(allocator, content, chunk_tokens, chunk_overlap);
     defer allocator.free(chunks);
+    // Only the slice is freed above; the chunk texts are handed to the
+    // caller on success, so they have to be freed explicitly if this
+    // allocation is the one that fails.
+    errdefer for (chunks) |c| allocator.free(c.text);
 
     const texts = try allocator.alloc([]const u8, chunks.len);
     for (chunks, 0..) |c, i| texts[i] = c.text;
@@ -148,6 +152,9 @@ fn flushCurrent(
     }
 
     const text = try allocator.alloc(u8, total);
+    // Not owned by `chunks` until the append below succeeds, so it has to be
+    // released if that append is the allocation that fails.
+    errdefer allocator.free(text);
     var pos: usize = 0;
     for (current.items, 0..) |e, i| {
         @memcpy(text[pos .. pos + e.text.len], e.text);
@@ -275,4 +282,51 @@ test "max_chars floors at 32 even for a tiny token budget" {
     defer freeChunks(std.testing.allocator, chunks);
     try std.testing.expectEqual(@as(usize, 1), chunks.len);
     try std.testing.expectEqualStrings("hi", chunks[0].text);
+}
+
+test "chunkMarkdown unwinds cleanly when an allocation fails partway through" {
+    // Regression: a chunk's joined text is not owned by the chunk list until
+    // `append` succeeds, so a failure there used to leak the text buffer.
+    // Fail every allocation index in turn; each run must either succeed or
+    // return `error.OutOfMemory`, having freed everything it allocated.
+    const content = "# title\n\nalpha beta gamma\ndelta epsilon zeta\n\neta theta iota kappa\n";
+
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const clean = try chunkMarkdown(probe.allocator(), content, 10, 4);
+    freeChunks(probe.allocator(), clean);
+
+    var fail_index: usize = 0;
+    while (fail_index < probe.alloc_index) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        if (chunkMarkdown(failing.allocator(), content, 10, 4)) |chunks| {
+            freeChunks(failing.allocator(), chunks);
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+        }
+        try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+    }
+}
+
+test "chunkText frees the chunk texts it is holding when its own allocation fails" {
+    // Regression: `chunkText` frees only the chunk *slice* on the way out;
+    // the texts it is about to hand over are its responsibility until it
+    // returns successfully.
+    const content = "alpha beta\ngamma delta\nepsilon zeta\n";
+
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const clean = try chunkText(probe.allocator(), content, 10, 4);
+    for (clean) |t| probe.allocator().free(t);
+    probe.allocator().free(clean);
+
+    var fail_index: usize = 0;
+    while (fail_index < probe.alloc_index) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        if (chunkText(failing.allocator(), content, 10, 4)) |texts| {
+            for (texts) |t| failing.allocator().free(t);
+            failing.allocator().free(texts);
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+        }
+        try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+    }
 }

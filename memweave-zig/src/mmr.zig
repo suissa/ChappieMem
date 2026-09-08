@@ -63,6 +63,11 @@ pub fn tokenizeForMmr(allocator: std.mem.Allocator, text: []const u8) !TokenSet 
 
         const raw = text[i..j];
         const lowered = try allocator.alloc(u8, raw.len);
+        // Scoped to this iteration: `lowered` is not yet owned by `tokens`,
+        // so if the append below fails it would otherwise leak. Once the
+        // iteration ends without an error this is discarded, and the dup
+        // branch's explicit free stays correct.
+        errdefer allocator.free(lowered);
         for (raw, 0..) |c, k| lowered[k] = toLowerAscii(c);
 
         var dup = false;
@@ -135,12 +140,18 @@ pub fn mmrRerank(allocator: std.mem.Allocator, rows: []const types.RawSearchRow,
     }
 
     const token_sets = try allocator.alloc(TokenSet, rows.len);
+    // `alloc` returns uninitialized memory, so the cleanup below must only
+    // touch the entries that were actually built. Freeing the whole slice
+    // would run `deinit` over undefined `TokenSet`s if tokenization fails
+    // partway through the loop — freeing garbage pointers.
+    var built: usize = 0;
     defer {
-        for (token_sets) |*ts| ts.deinit(allocator);
+        for (token_sets[0..built]) |*ts| ts.deinit(allocator);
         allocator.free(token_sets);
     }
     for (rows, 0..) |r, idx| {
         token_sets[idx] = try tokenizeForMmr(allocator, r.text);
+        built = idx + 1;
     }
 
     var max_score = rows[0].score;
@@ -285,4 +296,52 @@ test "mmrRerank: single row and empty input pass through unchanged" {
     const out2 = try mmrRerank(std.testing.allocator, &.{}, 0.5);
     defer std.testing.allocator.free(out2);
     try std.testing.expectEqual(@as(usize, 0), out2.len);
+}
+
+test "tokenizeForMmr frees the token it is holding when the append fails" {
+    // Regression: a freshly lowercased token is not owned by the list until
+    // `append` succeeds, so a failure there used to leak it.
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    var clean = try tokenizeForMmr(probe.allocator(), "memory context retrieval memory");
+    clean.deinit(probe.allocator());
+
+    var fail_index: usize = 0;
+    while (fail_index < probe.alloc_index) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        if (tokenizeForMmr(failing.allocator(), "memory context retrieval memory")) |set| {
+            var owned = set;
+            owned.deinit(failing.allocator());
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+        }
+        try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+    }
+}
+
+test "mmrRerank unwinds cleanly when an allocation fails partway through" {
+    // Regression: the token-set array is allocated uninitialized, so a
+    // failure inside the tokenization loop used to leave the cleanup path
+    // freeing undefined pointers. Fail every allocation index in turn and
+    // require the same two things at each one: the error is `OutOfMemory`,
+    // and every byte allocated before the failure is freed again.
+    const rows = [_]types.RawSearchRow{
+        .{ .chunk_id = "a", .path = "a.md", .source = "workspace", .start_line = 1, .end_line = 2, .text = "memory context retrieval", .score = 0.9 },
+        .{ .chunk_id = "b", .path = "b.md", .source = "workspace", .start_line = 3, .end_line = 4, .text = "vector index embedding", .score = 0.8 },
+        .{ .chunk_id = "c", .path = "c.md", .source = "workspace", .start_line = 5, .end_line = 6, .text = "memory context retrieval", .score = 0.7 },
+    };
+
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const clean = try mmrRerank(probe.allocator(), &rows, 0.5);
+    probe.allocator().free(clean);
+
+    var fail_index: usize = 0;
+    while (fail_index < probe.alloc_index) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        if (mmrRerank(failing.allocator(), &rows, 0.5)) |out| {
+            failing.allocator().free(out);
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+        }
+        try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+    }
 }

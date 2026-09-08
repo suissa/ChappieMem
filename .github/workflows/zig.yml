@@ -105,6 +105,48 @@ jobs:
         working-directory: memweave-zig
         run: zig build test --summary all
 
+      - name: Upload unit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memweave-unit-report-${{ matrix.os }}
+          path: memweave-zig/reports/unit.json
+          if-no-files-found: warn
+
+  # The load, stress, chaos, sync and bench suites. They are volume tests, so
+  # they run at a reduced --scale here: every assertion still executes, with
+  # a tenth of the work, which keeps the job under a couple of minutes while
+  # still catching a regression. See memweave-zig/testing/README.md.
+  memweave-zig-suites:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Ensure zig package-fetch tmp dir exists
+        shell: bash
+        run: mkdir -p "$ZIG_GLOBAL_CACHE_DIR/tmp"
+
+      # A fixed seed so a CI failure is reproducible verbatim: the seed is
+      # recorded in every report, and re-running locally with the same
+      # --seed reproduces the exact workload.
+      - name: Run every suite
+        working-directory: memweave-zig
+        run: zig build verify -- --scale=0.1 --seed=0x5EED0C1
+
+      - name: Upload suite reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memweave-suite-reports
+          path: memweave-zig/reports/*.json
+          if-no-files-found: error
+
   memweave-zig-vector-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
